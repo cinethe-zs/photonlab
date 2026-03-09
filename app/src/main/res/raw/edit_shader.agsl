@@ -1,0 +1,97 @@
+// Simpledit tone-adjustment shader (AGSL / SkSL)
+// All adjustment values are pre-normalized by the Kotlin caller:
+//   exposure   : EV offset, range -5..5
+//   luminosity : linear offset, range -0.5..0.5  (slider -100..100 / 200)
+//   contrast   : scale factor offset, range -1..1 (slider -100..100 / 100)
+//   saturation : saturation delta, range -1..1    (slider -100..100 / 100)
+//   highlights : highlight lift, range -0.5..0.5  (slider -100..100 / 200)
+//   shadows    : shadow lift, range -0.5..0.5     (slider -100..100 / 200)
+
+uniform shader inputImage;
+uniform float exposure;
+uniform float luminosity;
+uniform float contrast;
+uniform float saturation;
+uniform float highlights;
+uniform float shadows;
+
+float srgbToLinear(float c) {
+    return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4);
+}
+
+float linearToSrgb(float c) {
+    return c <= 0.0031308 ? c * 12.92 : 1.055 * pow(c, 1.0 / 2.4) - 0.055;
+}
+
+float luminance(float3 rgb) {
+    return dot(rgb, float3(0.2126, 0.7152, 0.0722));
+}
+
+float3 rgbToHsl(float3 rgb) {
+    float maxC = max(rgb.r, max(rgb.g, rgb.b));
+    float minC = min(rgb.r, min(rgb.g, rgb.b));
+    float delta = maxC - minC;
+    float l = (maxC + minC) * 0.5;
+    if (delta < 0.00001) return float3(0.0, 0.0, l);
+    float s = delta / (1.0 - abs(2.0 * l - 1.0));
+    float h;
+    if (maxC == rgb.r)      h = mod((rgb.g - rgb.b) / delta, 6.0);
+    else if (maxC == rgb.g) h = (rgb.b - rgb.r) / delta + 2.0;
+    else                    h = (rgb.r - rgb.g) / delta + 4.0;
+    h /= 6.0;
+    return float3(h, s, l);
+}
+
+float3 hslToRgb(float3 hsl) {
+    float h = hsl.x, s = hsl.y, l = hsl.z;
+    float c = (1.0 - abs(2.0 * l - 1.0)) * s;
+    float h6 = h * 6.0;
+    float x = c * (1.0 - abs(mod(h6, 2.0) - 1.0));
+    float m = l - c * 0.5;
+    float3 rgb;
+    if      (h6 < 1.0) rgb = float3(c, x, 0.0);
+    else if (h6 < 2.0) rgb = float3(x, c, 0.0);
+    else if (h6 < 3.0) rgb = float3(0.0, c, x);
+    else if (h6 < 4.0) rgb = float3(0.0, x, c);
+    else if (h6 < 5.0) rgb = float3(x, 0.0, c);
+    else                rgb = float3(c, 0.0, x);
+    return rgb + m;
+}
+
+half4 main(float2 fragCoord) {
+    half4 color = inputImage.eval(fragCoord);
+    float3 rgb = float3(color.rgb);
+
+    // --- Exposure (operate in linear light) ---
+    if (exposure != 0.0) {
+        float3 lin = float3(srgbToLinear(rgb.r), srgbToLinear(rgb.g), srgbToLinear(rgb.b));
+        lin *= pow(2.0, exposure);
+        lin = clamp(lin, 0.0, 1.0);
+        rgb = float3(linearToSrgb(lin.r), linearToSrgb(lin.g), linearToSrgb(lin.b));
+    }
+
+    // --- Luminosity ---
+    rgb = clamp(rgb + luminosity, 0.0, 1.0);
+
+    // --- Contrast: scale around mid-grey ---
+    if (contrast != 0.0) {
+        rgb = clamp((rgb - 0.5) * (1.0 + contrast) + 0.5, 0.0, 1.0);
+    }
+
+    // --- Highlights & Shadows (luma-masked) ---
+    if (highlights != 0.0 || shadows != 0.0) {
+        float lum = luminance(rgb);
+        float hMask = max(0.0, (lum - 0.5) * 2.0);
+        float sMask = max(0.0, (0.5 - lum) * 2.0);
+        rgb = clamp(rgb + highlights * hMask + shadows * sMask, 0.0, 1.0);
+    }
+
+    // --- Saturation ---
+    if (saturation != 0.0) {
+        float3 hsl = rgbToHsl(rgb);
+        hsl.y = clamp(hsl.y + saturation, 0.0, 1.0);
+        rgb = hslToRgb(hsl);
+    }
+
+    return half4(float4(rgb, color.a));
+}

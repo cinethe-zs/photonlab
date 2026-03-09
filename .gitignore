@@ -1,0 +1,41 @@
+# ── Gradle ──────────────────────────────────────────────────────────────────
+.gradle/
+build/
+**/build/
+!gradle/wrapper/gradle-wrapper.jar
+
+# ── Android Studio / IntelliJ ────────────────────────────────────────────────
+.idea/
+*.iml
+*.ipr
+*.iws
+local.properties
+captures/
+.externalNativeBuild/
+.cxx/
+
+# ── Kotlin build artifacts ───────────────────────────────────────────────────
+*.class
+*.jar
+*.aar
+
+# ── Signing keys — NEVER commit these ───────────────────────────────────────
+*.jks
+*.keystore
+keystore.properties
+
+# ── APK / AAB outputs ────────────────────────────────────────────────────────
+*.apk
+*.aab
+
+# ── macOS / Windows ──────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+Desktop.ini
+
+# ── Logs ─────────────────────────────────────────────────────────────────────
+*.log
+lint-results*
+
+# ── Test results ─────────────────────────────────────────────────────────────
+test-results/

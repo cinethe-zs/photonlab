@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  108×108dp canvas  |  safe zone: 18–90 on both axes
+  Design: RGB histogram bars inside a dotted 3:4 photo frame, enclosed by a cyan ring.
+  Geometric property: frame corners (36,30)/(72,30)/(36,78)/(72,78) sit exactly on the
+  r=30 circle — 18² + 24² = 900 = 30².
+-->
+<vector xmlns:android="http://schemas.android.com/apk/res/android"
+    android:width="108dp"
+    android:height="108dp"
+    android:viewportWidth="108"
+    android:viewportHeight="108">
+
+    <!-- Pale cyan fill inside the ring — very subtle tint on the white background -->
+    <path
+        android:pathData="M54,24 A30,30 0 1,0 54,84 A30,30 0 1,0 54,24 Z"
+        android:fillColor="#1800E5FF" />
+
+    <!-- Cyan ring — r=30, thick stroke -->
+    <path
+        android:pathData="M54,24 A30,30 0 1,0 54,84 A30,30 0 1,0 54,24 Z"
+        android:fillColor="#00000000"
+        android:strokeColor="#CC00E5FF"
+        android:strokeWidth="3.0" />
+
+    <!--
+      Dotted 3:4 photo frame — 36 wide × 48 tall, centred at (54,54)
+      TL=(36,30)  TR=(72,30)  BL=(36,78)  BR=(72,78)
+      Square marks 2×2, spacing 6 units.
+      Top    (y=30): x = 36 42 48 54 60 66 72
+      Bottom (y=78): x = 36 42 48 54 60 66 72
+      Left   (x=36): y = 36 42 48 54 60 66 72  (corners covered above)
+      Right  (x=72): y = 36 42 48 54 60 66 72
+    -->
+    <path
+        android:fillColor="#CC00E5FF"
+        android:pathData="
+M 35,29 h 2 v 2 h -2 Z
+M 41,29 h 2 v 2 h -2 Z
+M 47,29 h 2 v 2 h -2 Z
+M 53,29 h 2 v 2 h -2 Z
+M 59,29 h 2 v 2 h -2 Z
+M 65,29 h 2 v 2 h -2 Z
+M 71,29 h 2 v 2 h -2 Z
+M 35,77 h 2 v 2 h -2 Z
+M 41,77 h 2 v 2 h -2 Z
+M 47,77 h 2 v 2 h -2 Z
+M 53,77 h 2 v 2 h -2 Z
+M 59,77 h 2 v 2 h -2 Z
+M 65,77 h 2 v 2 h -2 Z
+M 71,77 h 2 v 2 h -2 Z
+M 35,35 h 2 v 2 h -2 Z
+M 35,41 h 2 v 2 h -2 Z
+M 35,47 h 2 v 2 h -2 Z
+M 35,53 h 2 v 2 h -2 Z
+M 35,59 h 2 v 2 h -2 Z
+M 35,65 h 2 v 2 h -2 Z
+M 35,71 h 2 v 2 h -2 Z
+M 71,35 h 2 v 2 h -2 Z
+M 71,41 h 2 v 2 h -2 Z
+M 71,47 h 2 v 2 h -2 Z
+M 71,53 h 2 v 2 h -2 Z
+M 71,59 h 2 v 2 h -2 Z
+M 71,65 h 2 v 2 h -2 Z
+M 71,71 h 2 v 2 h -2 Z" />
+
+    <!-- Baseline -->
+    <path
+        android:pathData="M36,72 H72"
+        android:fillColor="#00000000"
+        android:strokeColor="#8000E5FF"
+        android:strokeWidth="1.5"
+        android:strokeLineCap="round" />
+
+    <!-- Red bar (left, medium height) — true red -->
+    <path
+        android:pathData="M34,72 L34,48 Q34,45 37,45 L43,45 Q46,45 46,48 L46,72 Z"
+        android:fillColor="#EFF44336" />
+
+    <!-- Green bar (centre, tallest) — true green -->
+    <path
+        android:pathData="M49,72 L49,37 Q49,34 52,34 L58,34 Q61,34 61,37 L61,72 Z"
+        android:fillColor="#EF4CAF50" />
+
+    <!-- Blue bar (right, shortest) — true blue -->
+    <path
+        android:pathData="M64,72 L64,55 Q64,52 67,52 L73,52 Q76,52 76,55 L76,72 Z"
+        android:fillColor="#EF2196F3" />
+
+</vector>

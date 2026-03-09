@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">PhotonLab</string>
+
+    <!-- Tool categories -->
+    <string name="category_tone">Tone</string>
+    <string name="category_color">Color</string>
+    <string name="category_lut">LUT</string>
+    <string name="category_transform">Transform</string>
+
+    <!-- Tone tools -->
+    <string name="tool_exposure">Exposure</string>
+    <string name="tool_luminosity">Luminosity</string>
+    <string name="tool_contrast">Contrast</string>
+    <string name="tool_highlights">Highlights</string>
+    <string name="tool_shadows">Shadows</string>
+
+    <!-- Color tools -->
+    <string name="tool_saturation">Saturation</string>
+
+    <!-- LUT -->
+    <string name="lut_import">Import LUT</string>
+    <string name="lut_none">No LUT</string>
+    <string name="lut_remove">Remove LUT</string>
+
+    <!-- Transform -->
+    <string name="transform_rotate_cw">Rotate CW</string>
+    <string name="transform_rotate_ccw">Rotate CCW</string>
+    <string name="transform_crop">Crop</string>
+    <string name="transform_reset_crop">Reset Crop</string>
+
+    <!-- Actions -->
+    <string name="action_open_image">Open Image</string>
+    <string name="action_export">Export</string>
+    <string name="action_undo">Undo</string>
+    <string name="action_redo">Redo</string>
+    <string name="action_reset">Reset All</string>
+    <string name="action_compare">Hold to compare</string>
+
+    <!-- Messages -->
+    <string name="msg_export_success">Saved to Pictures/PhotonLab</string>
+    <string name="msg_export_error">Export failed</string>
+    <string name="msg_no_image">Open an image to start editing</string>
+    <string name="msg_lut_loaded">LUT applied</string>
+    <string name="msg_lut_error">Failed to load LUT file</string>
+    <string name="msg_processing">Processing…</string>
+</resources>
