@@ -362,9 +362,8 @@ class EditPipeline @Inject constructor(
     // ── Noise (denoise / film grain) ──────────────────────────────────────────
 
     /**
-     * noise < 0: denoise by blending with a separable 3×3 box-blur (strength = |noise|/100)
-     * noise > 0: add luminance-preserving film grain (amplitude = noise/100 × 50 counts)
-     * Grain seed is fixed per image dimensions for a stable preview pattern.
+     * noise < 0: denoise — blend with a separable 3×3 box-blur
+     * noise > 0: procedural film grain (see [applyFilmGrain])
      */
     private fun applyNoise(src: Bitmap, noise: Float): Bitmap {
         val w = src.width; val h = src.height
@@ -420,24 +419,138 @@ class EditPipeline @Inject constructor(
             result.setPixels(out, 0, w, 0, 0, w, h)
             return result
         } else {
-            // Grain
-            val maxOffset = (noise / 100f * 50f).toInt().coerceAtLeast(1)
-            val rng = java.util.Random((w.toLong() * 31L + h) * 37L)
-            for (i in pixels.indices) {
-                val a = (pixels[i] ushr 24) and 0xFF
-                val r = (pixels[i] shr 16)  and 0xFF
-                val g = (pixels[i] shr  8)  and 0xFF
-                val b =  pixels[i]           and 0xFF
-                val d = (rng.nextFloat() * 2f - 1f).let { (it * maxOffset).toInt() }
-                pixels[i] = (a shl 24) or
-                    ((r + d).coerceIn(0, 255) shl 16) or
-                    ((g + d).coerceIn(0, 255) shl  8) or
-                    (b + d).coerceIn(0, 255)
-            }
-            val result = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
-            result.setPixels(pixels, 0, w, 0, 0, w, h)
-            return result
+            return applyFilmGrain(src, noise)
         }
+    }
+
+    /**
+     * Procedural film grain generator modelled on real scanned silver-halide film.
+     *
+     * Key properties vs the previous uniform-noise approach:
+     *
+     * 1. **Gaussian distribution** — silver crystal exposure follows a normal distribution.
+     *    Implemented via CLT (sum of 3 uniforms ≈ N(0,1)) driven by a fast xorshift64 PRNG.
+     *
+     * 2. **Spatial coherence** — real grains are 2–5 µm crystals that clump; at typical
+     *    scan resolution they appear as 2–3 px blobs, not isolated point samples.
+     *    A separable box-blur over the generated field creates this structure.
+     *    Blob radius scales with strength (fine grain at low values, coarse at high).
+     *
+     * 3. **Luminance masking** — grain is most visible in midtones (~lum = 0.4–0.6),
+     *    suppressed at both extremes:
+     *    • Deep shadows: low photon count, grain below noise floor → ~10% grain present
+     *    • Bright highlights: dye-layer saturation bleaches grain → fast rolloff
+     *
+     * 4. **Per-channel independence** — color film has separate R, G, B emulsion layers
+     *    with slightly different crystal sizes and sensitivities.  A secondary independent
+     *    grain field drives a small chroma perturbation (R and B shift in opposition,
+     *    G remains as the luma reference), producing the subtle cyan/magenta flicker
+     *    characteristic of pushed color film (Portra 800, Ektar 100 at box speed, etc.).
+     *
+     * Seed is fixed per (width, height) so the preview is stable across slider changes.
+     */
+    private fun applyFilmGrain(src: Bitmap, strength: Float): Bitmap {
+        val w = src.width
+        val h = src.height
+        val n = w * h
+        val pixels = IntArray(n)
+        src.getPixels(pixels, 0, w, 0, 0, w, h)
+
+        val amp = strength / 100f
+        // Peak grain amplitude (0..255 scale).
+        // 100 % → ~16 counts σ at midtones ≈ pushed ISO 3200 / Tri-X character.
+        val grainAmp = amp * 16f
+        // Blob radius: 1 px (fine) at low strength → 2 px (coarse) at high.
+        val blurR = if (amp < 0.5f) 1 else 2
+        val blurD = (2 * blurR + 1).toFloat()
+
+        // Deterministic seeds — stable grain across same-size renders.
+        var xs1 = (w.toLong() * 1664525L xor h.toLong() * 22695477L xor 0x3141592653589793L) or 1L
+        var xs2 = (xs1 * 6364136223846793005L + 1442695040888963407L) or 1L
+
+        // Xorshift64 — several times faster than java.util.Random.
+        fun rng1(): Long { xs1 = xs1 xor (xs1 shl 13); xs1 = xs1 xor (xs1 ushr 7); xs1 = xs1 xor (xs1 shl 17); return xs1 }
+        fun rng2(): Long { xs2 = xs2 xor (xs2 shl 7); xs2 = xs2 xor (xs2 ushr 9); xs2 = xs2 xor (xs2 shl 8); return xs2 }
+        // Map to float in [-1, 1]
+        fun f1() = (rng1() and 0xFFFFFFL).toFloat() / 0x800000.toFloat() - 1f
+        fun f2() = (rng2() and 0xFFFFFFL).toFloat() / 0x800000.toFloat() - 1f
+        // Approximate N(0,1) via sum of three uniforms (central limit theorem).
+        fun gauss1() = (f1() + f1() + f1()) * 0.5774f
+        fun gauss2() = (f2() + f2() + f2()) * 0.5774f
+
+        // --- Generate two independent grain fields ---
+        // lumaG  : drives equal shift on all three channels (structure / density)
+        // chromaG: drives R↑B↓ or R↓B↑ perturbation (color-layer independence)
+        val lumaG   = FloatArray(n) { gauss1() }
+        val chromaG = FloatArray(n) { gauss2() * 0.35f }   // chroma ≈ 35% of luma amplitude
+
+        // --- Separable box-blur → spatial coherence (grain blob size) ---
+        val tempL = FloatArray(n)
+        val tempC = FloatArray(n)
+
+        // Horizontal pass
+        for (y in 0 until h) {
+            for (x in 0 until w) {
+                val x0 = maxOf(0, x - blurR); val x1 = minOf(w - 1, x + blurR)
+                val cnt = (x1 - x0 + 1).toFloat()
+                var sL = 0f; var sC = 0f
+                for (xi in x0..x1) { val idx = y * w + xi; sL += lumaG[idx]; sC += chromaG[idx] }
+                tempL[y * w + x] = sL / cnt; tempC[y * w + x] = sC / cnt
+            }
+        }
+        // Vertical pass
+        for (y in 0 until h) {
+            for (x in 0 until w) {
+                val y0 = maxOf(0, y - blurR); val y1 = minOf(h - 1, y + blurR)
+                val cnt = (y1 - y0 + 1).toFloat()
+                var sL = 0f; var sC = 0f
+                for (yi in y0..y1) { val idx = yi * w + x; sL += tempL[idx]; sC += tempC[idx] }
+                lumaG[y * w + x] = sL / cnt; chromaG[y * w + x] = sC / cnt
+            }
+        }
+        // blurD² factor restores variance lost during the 2-D blur so that amplitude
+        // is consistent regardless of the chosen blob radius.
+
+        // --- Apply grain with luminance masking ---
+        for (i in pixels.indices) {
+            val px = pixels[i]
+            val a  = (px ushr 24) and 0xFF
+            val ri = (px shr 16) and 0xFF
+            val gi = (px shr  8) and 0xFF
+            val bi =  px          and 0xFF
+
+            val lum = (0.2126f * ri + 0.7152f * gi + 0.0722f * bi) / 255f
+
+            // Luminance mask: smooth bell peaking in the midtones.
+            // Shadows and highlights retain a 10% floor (base fog / residual structure).
+            val l = lum.coerceIn(0f, 1f)
+            val lumMask = if (l < 0.5f) {
+                val t = l * 2f;         0.1f + t * (2f - t) * 0.9f   // ease-in 0→1 over shadows→mid
+            } else {
+                val t = (l - 0.5f) * 2f; 0.1f + (1f - t * t) * 0.9f  // quadratic rolloff over mid→highlights
+            }
+
+            // Scale grain: blurD² restores blur-reduced variance, grainAmp sets overall level.
+            val gL = lumaG[i]   * blurD * blurD * grainAmp * lumMask
+            val gC = chromaG[i] * blurD * blurD * grainAmp * lumMask
+
+            // Per-channel application:
+            //   R layer: luma + chroma push (R-sensitive layer, more variation)
+            //   G layer: luma only          (finest grain, closest to luma)
+            //   B layer: luma − chroma push (B-sensitive layer, complementary shift)
+            val dR = (gL + gC * 0.7f).toInt()
+            val dG =  gL.toInt()
+            val dB = (gL - gC * 0.7f).toInt()
+
+            pixels[i] = (a shl 24) or
+                ((ri + dR).coerceIn(0, 255) shl 16) or
+                ((gi + dG).coerceIn(0, 255) shl  8) or
+                (bi + dB).coerceIn(0, 255)
+        }
+
+        val result = Bitmap.createBitmap(w, h, Bitmap.Config.ARGB_8888)
+        result.setPixels(pixels, 0, w, 0, 0, w, h)
+        return result
     }
 
     // ── LUT (CPU trilinear interpolation) ─────────────────────────────────────
