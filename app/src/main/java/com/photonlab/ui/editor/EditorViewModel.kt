@@ -14,6 +14,7 @@ import com.photonlab.data.repository.LutRepository
 import com.photonlab.domain.EditHistoryManager
 import com.photonlab.domain.model.EditState
 import com.photonlab.domain.model.LutFile
+import com.photonlab.domain.model.LutType
 import com.photonlab.domain.model.NormalizedRect
 import com.photonlab.rendering.EditPipeline
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -31,6 +32,8 @@ import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
+import java.io.DataInputStream
+import java.io.DataOutputStream
 import java.io.File
 import javax.inject.Inject
 
@@ -225,7 +228,7 @@ class EditorViewModel @Inject constructor(
                 it.copy(
                     sourceBitmap        = bitmap,
                     previewBitmap       = quickSourceBitmap,
-                    originalGeomBitmap  = quickSourceBitmap,
+                    originalGeomBitmap  = previewSourceBitmap ?: quickSourceBitmap,
                     cropSourceBitmap    = null,
                     editState           = initialState,
                     currentLut          = initialLut,
@@ -628,19 +631,14 @@ class EditorViewModel @Inject constructor(
         renderJob?.cancel()
         renderJob = viewModelScope.launch {
             // Immediate quick render (512px)
+            // processAll() returns (framed, preFrame) in one pipeline run — preFrame is
+            // used as histogramBitmap so border pixels never contaminate the histogram.
             val quick = quickSourceBitmap
             if (quick != null) {
                 val lut = _uiState.value.currentLut
-                val q = withContext(Dispatchers.Default) {
-                    pipeline.process(quick, state, lut)
+                val (q, histo) = withContext(Dispatchers.Default) {
+                    pipeline.processAll(quick, state, lut)
                 }
-                // For histogram: always use a frame-free version so frame border pixels
-                // don't contaminate the histogram with white/black/grey spikes.
-                val histo = if (state.frameEnabled) {
-                    withContext(Dispatchers.Default) {
-                        pipeline.process(quick, state.copy(frameEnabled = false), lut)
-                    }
-                } else q
                 _uiState.update { it.copy(previewBitmap = q, histogramBitmap = histo) }
             }
             // Quality render (1280px) — immediate or debounced
@@ -659,7 +657,7 @@ class EditorViewModel @Inject constructor(
     private fun scheduleGeomRender(state: EditState) {
         geomRenderJob?.cancel()
         geomRenderJob = viewModelScope.launch {
-            val quick = quickSourceBitmap ?: return@launch
+            val src = previewSourceBitmap ?: quickSourceBitmap ?: return@launch
             val geomState = EditState(
                 rotation     = state.rotation,
                 fineRotation = state.fineRotation,
@@ -669,7 +667,7 @@ class EditorViewModel @Inject constructor(
                 frameRatio   = state.frameRatio,
                 frameSizePct = state.frameSizePct,
             )
-            val geom = withContext(Dispatchers.Default) { pipeline.process(quick, geomState, null) }
+            val geom = withContext(Dispatchers.Default) { pipeline.process(src, geomState, null) }
             _uiState.update { it.copy(originalGeomBitmap = geom) }
         }
     }
@@ -706,6 +704,7 @@ class EditorViewModel @Inject constructor(
 
     private fun persistPresets(presets: List<Preset>) {
         runCatching {
+            val lutsDir = File(context.filesDir, "luts").also { it.mkdirs() }
             val arr = JSONArray()
             for (p in presets) {
                 val s = p.state
@@ -730,13 +729,32 @@ class EditorViewModel @Inject constructor(
                     put("frameRatio",     s.frameRatio.toDouble())
                     put("frameSizePct",   s.frameSizePct.toDouble())
                     put("includedParams", paramsArr)
-                    // lutUri not persisted (URI may go stale)
+                    // Persist LUT by copying its parsed float data to internal storage
+                    val lut = p.lut
+                    if (lut != null) {
+                        val binName = sanitizeLutName(lut.name) + ".bin"
+                        val binFile = File(lutsDir, binName)
+                        if (!binFile.exists()) {
+                            DataOutputStream(binFile.outputStream().buffered()).use { dos ->
+                                dos.writeInt(lut.size)
+                                dos.writeInt(lut.type.ordinal)
+                                for (f in lut.data) dos.writeFloat(f)
+                            }
+                        }
+                        put("lutPath", binName)
+                        put("lutName", lut.name)
+                    }
                 }
                 arr.put(obj)
             }
             presetsFile.writeText(arr.toString())
+            // Remove bin files no longer referenced by any preset
+            val referenced = presets.mapNotNull { it.lut?.let { l -> sanitizeLutName(l.name) + ".bin" } }.toSet()
+            lutsDir.listFiles()?.forEach { if (it.name !in referenced) it.delete() }
         }
     }
+
+    private fun sanitizeLutName(name: String) = name.replace(Regex("[^A-Za-z0-9._-]"), "_")
 
     private fun loadPresets(): List<Preset> = runCatching {
         if (!presetsFile.exists()) return@runCatching emptyList()
@@ -771,7 +789,22 @@ class EditorViewModel @Inject constructor(
                         }
                     }.ifEmpty { PresetParam.ALL }
                 } else PresetParam.ALL
-                add(Preset(obj.getString("name"), state, lut = null, includedParams))
+                val lut = run {
+                    val lutPath = obj.optString("lutPath", "")
+                    val lutName = obj.optString("lutName", "")
+                    if (lutPath.isEmpty()) return@run null
+                    val binFile = File(context.filesDir, "luts/$lutPath")
+                    if (!binFile.exists()) return@run null
+                    runCatching {
+                        DataInputStream(binFile.inputStream().buffered()).use { dis ->
+                            val size = dis.readInt()
+                            val type = if (dis.readInt() == LutType.HALD_CLUT.ordinal) LutType.HALD_CLUT else LutType.CUBE_3D
+                            val data = FloatArray(size * size * size * 3) { dis.readFloat() }
+                            LutFile(Uri.EMPTY, lutName, type, data, size)
+                        }
+                    }.getOrNull()
+                }
+                add(Preset(obj.getString("name"), state, lut, includedParams))
             }
         }
     }.getOrDefault(emptyList())

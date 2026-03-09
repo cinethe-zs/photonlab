@@ -134,8 +134,8 @@ fun EditorScreen(
         val maxX = (boxSize.width  * (zoom - 1)) / 2f
         val maxY = (boxSize.height * (zoom - 1)) / 2f
         zoomOffset = Offset(
-            (zoomOffset.x + panChange.x).coerceIn(-maxX, maxX),
-            (zoomOffset.y + panChange.y).coerceIn(-maxY, maxY),
+            (zoomOffset.x + panChange.x * zoom).coerceIn(-maxX, maxX),
+            (zoomOffset.y + panChange.y * zoom).coerceIn(-maxY, maxY),
         )
     }
 

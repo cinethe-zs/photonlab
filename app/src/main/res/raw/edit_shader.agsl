@@ -1,19 +1,26 @@
-// Simpledit tone-adjustment shader (AGSL / SkSL)
-// All adjustment values are pre-normalized by the Kotlin caller:
-//   exposure   : EV offset, range -5..5
-//   luminosity : linear offset, range -0.5..0.5  (slider -100..100 / 200)
-//   contrast   : scale factor offset, range -1..1 (slider -100..100 / 100)
-//   saturation : saturation delta, range -1..1    (slider -100..100 / 100)
-//   highlights : highlight lift, range -0.5..0.5  (slider -100..100 / 200)
-//   shadows    : shadow lift, range -0.5..0.5     (slider -100..100 / 200)
+// PhotonLab tone-adjustment shader (AGSL / SkSL)
+// Executed via RuntimeShader on API 33+ for GPU-accelerated tone processing.
+// All values are pre-normalized by the Kotlin caller to match applyToneSoftware():
+//   exposure    : EV offset          range -5..+5
+//   luminosity  : linear offset      range -0.5..+0.5   (slider / 200)
+//   contrast    : scale offset       range -1..+1       (slider / 100)
+//   saturation  : saturation delta   range -1..+0.5     (normalized asymmetrically)
+//   vibrance    : vibrance           range -1..+1       (slider / 100)
+//   highlights  : highlight lift     range -0.5..+0.5   (slider / 200)
+//   shadows     : shadow lift        range -0.5..+0.5   (slider / 200)
+//   temperature : warm/cool          range -1..+1       (slider / 100)
+//   tint        : green/magenta      range -1..+1       (slider / 100)
 
 uniform shader inputImage;
 uniform float exposure;
 uniform float luminosity;
 uniform float contrast;
 uniform float saturation;
+uniform float vibrance;
 uniform float highlights;
 uniform float shadows;
+uniform float temperature;
+uniform float tint;
 
 float srgbToLinear(float c) {
     return c <= 0.04045 ? c / 12.92 : pow((c + 0.055) / 1.055, 2.4);
@@ -71,7 +78,9 @@ half4 main(float2 fragCoord) {
     }
 
     // --- Luminosity ---
-    rgb = clamp(rgb + luminosity, 0.0, 1.0);
+    if (luminosity != 0.0) {
+        rgb = clamp(rgb + luminosity, 0.0, 1.0);
+    }
 
     // --- Contrast: scale around mid-grey ---
     if (contrast != 0.0) {
@@ -86,10 +95,22 @@ half4 main(float2 fragCoord) {
         rgb = clamp(rgb + highlights * hMask + shadows * sMask, 0.0, 1.0);
     }
 
-    // --- Saturation ---
-    if (saturation != 0.0) {
+    // --- Temperature (warm/cool) and Tint (green/magenta) ---
+    if (temperature != 0.0 || tint != 0.0) {
+        rgb.r = clamp(rgb.r + temperature * 0.15, 0.0, 1.0);
+        rgb.g = clamp(rgb.g - tint * 0.15, 0.0, 1.0);
+        rgb.b = clamp(rgb.b - temperature * 0.2, 0.0, 1.0);
+    }
+
+    // --- Saturation + Vibrance (HSL) ---
+    if (saturation != 0.0 || vibrance != 0.0) {
         float3 hsl = rgbToHsl(rgb);
         hsl.y = clamp(hsl.y + saturation, 0.0, 1.0);
+        if (vibrance >= 0.0) {
+            hsl.y = clamp(hsl.y + vibrance * (1.0 - hsl.y), 0.0, 1.0);
+        } else {
+            hsl.y = clamp(hsl.y * (1.0 + vibrance), 0.0, 1.0);
+        }
         rgb = hslToRgb(hsl);
     }
 
