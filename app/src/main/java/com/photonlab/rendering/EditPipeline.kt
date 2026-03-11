@@ -254,9 +254,9 @@ class EditPipeline @Inject constructor(
                     val s     = delta / (1f - abs(2f * l - 1f))
                     var newS  = (s + saturation).coerceIn(0f, 1f)
                     newS = if (vibrance >= 0f)
-                        (newS + vibrance * (1f - newS)).coerceIn(0f, 1f)
+                        (newS + vibrance * 0.65f * (1f - newS) * (1f - newS * 0.5f)).coerceIn(0f, 1f)
                     else
-                        (newS * (1f + vibrance)).coerceIn(0f, 1f)
+                        (newS * (1f + vibrance * 0.65f)).coerceIn(0f, 1f)
                     val hRaw = when (maxC) {
                         r    -> (g - b) / delta
                         g    -> (b - r) / delta + 2f

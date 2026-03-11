@@ -39,6 +39,8 @@ import javax.inject.Inject
 
 enum class ToolCategory { TONE, COLOR, LUT, TRANSFORM }
 
+enum class GridMode { NONE, THIRDS, NINTHS, GOLDEN }
+
 // ── Preset parameter selection ─────────────────────────────────────────────────
 
 enum class PresetParam(val label: String) {
@@ -108,6 +110,12 @@ data class EditorUiState(
     // Histogram
     val showHistogram: Boolean = false,
     val histogramBitmap: Bitmap? = null,  // quick render WITHOUT frame (for accurate histogram)
+    // Grid overlay
+    val gridMode: GridMode = GridMode.NONE,
+    // Export / exit
+    val pendingExportCount: Int = 0,
+    val showExitConfirmDialog: Boolean = false,
+    val finishActivity: Boolean = false,
 )
 
 // ── Export job ────────────────────────────────────────────────────────────────
@@ -125,6 +133,8 @@ class EditorViewModel @Inject constructor(
 
     private val history = EditHistoryManager()
     private val prefs: SharedPreferences = context.getSharedPreferences("photonlab_prefs", Context.MODE_PRIVATE)
+    private val pendingExports = java.util.concurrent.atomic.AtomicInteger(0)
+    private var shouldAutoFinish = false
 
     private val _uiState = MutableStateFlow(EditorUiState())
     val uiState: StateFlow<EditorUiState> = _uiState.asStateFlow()
@@ -152,12 +162,19 @@ class EditorViewModel @Inject constructor(
         // Launch a single coroutine that drains the export queue sequentially
         viewModelScope.launch(Dispatchers.IO) {
             for (job in exportChannel) {
+                val count = pendingExports.incrementAndGet()
+                _uiState.update { it.copy(pendingExportCount = count) }
                 runCatching {
                     val processed = withContext(Dispatchers.Default) { pipeline.process(job.bitmap, job.state, job.lut) }
                     saveToMediaStore(processed, job.quality)
                     _uiState.update { it.copy(snackbarMessage = "Saved") }
                 }.onFailure { err ->
                     _uiState.update { it.copy(snackbarMessage = "Export failed: ${err.message}") }
+                }
+                val remaining = pendingExports.decrementAndGet()
+                _uiState.update { it.copy(pendingExportCount = remaining) }
+                if (remaining == 0 && shouldAutoFinish) {
+                    _uiState.update { it.copy(finishActivity = true) }
                 }
             }
         }
@@ -454,6 +471,20 @@ class EditorViewModel @Inject constructor(
     fun setShowOriginal(show: Boolean)    = _uiState.update { it.copy(showOriginal = show) }
     fun clearSnackbar()                   = _uiState.update { it.copy(snackbarMessage = null) }
     fun toggleHistogram()                 = _uiState.update { it.copy(showHistogram = !it.showHistogram) }
+    fun cycleGridMode()                   = _uiState.update {
+        val modes = GridMode.entries
+        it.copy(gridMode = modes[(it.gridMode.ordinal + 1) % modes.size])
+    }
+
+    // ── Exit / background export ───────────────────────────────────────────────
+
+    fun requestExit() = _uiState.update { it.copy(showExitConfirmDialog = true) }
+    fun dismissExitDialog() = _uiState.update { it.copy(showExitConfirmDialog = false) }
+    fun runExportsInBackground() {
+        shouldAutoFinish = true
+        _uiState.update { it.copy(showExitConfirmDialog = false) }
+    }
+    fun finishActivityHandled() = _uiState.update { it.copy(finishActivity = false) }
 
     // ── Preset ────────────────────────────────────────────────────────────────
 

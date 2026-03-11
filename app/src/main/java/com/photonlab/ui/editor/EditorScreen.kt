@@ -11,10 +11,12 @@ import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.gestures.awaitEachGesture
-import androidx.compose.foundation.gestures.detectTapGestures
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
+import androidx.compose.foundation.gestures.waitForUpOrCancellation
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -45,6 +47,7 @@ import androidx.compose.material.icons.filled.FileUpload
 import androidx.compose.material.icons.filled.FolderOpen
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.BarChart
+import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.Save
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SkipNext
@@ -84,6 +87,9 @@ import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalContext
+import android.app.Activity
+import kotlinx.coroutines.withTimeoutOrNull
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -117,6 +123,7 @@ fun EditorScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val snackbarHostState = remember { SnackbarHostState() }
+    val activity = LocalContext.current as? Activity
 
     var zoom by remember { mutableFloatStateOf(1f) }
     var zoomOffset by remember { mutableStateOf(Offset.Zero) }
@@ -155,6 +162,19 @@ fun EditorScreen(
         uiState.snackbarMessage?.let {
             snackbarHostState.showSnackbar(it)
             viewModel.clearSnackbar()
+        }
+    }
+
+    // Intercept back press when exports are pending
+    BackHandler(enabled = uiState.pendingExportCount > 0) {
+        viewModel.requestExit()
+    }
+
+    // Auto-finish when background exports complete
+    LaunchedEffect(uiState.finishActivity) {
+        if (uiState.finishActivity) {
+            viewModel.finishActivityHandled()
+            activity?.finish()
         }
     }
 
@@ -244,14 +264,32 @@ fun EditorScreen(
                             )
                             .transformable(transformableState)
                             .pointerInput(Unit) {
-                                detectTapGestures(
-                                    onDoubleTap = { zoom = 1f; zoomOffset = Offset.Zero },
-                                    onPress     = {
-                                        viewModel.setShowOriginal(true)
-                                        tryAwaitRelease()
-                                        viewModel.setShowOriginal(false)
-                                    },
-                                )
+                                // Custom gesture: show-original on press, double-tap to reset zoom.
+                                // A press held longer than 300 ms is treated as "viewing original"
+                                // and does NOT count as a tap for double-tap purposes, so looking
+                                // at the original twice never accidentally resets the zoom.
+                                awaitEachGesture {
+                                    awaitFirstDown(requireUnconsumed = false)
+                                    val pressStart = System.currentTimeMillis()
+                                    viewModel.setShowOriginal(true)
+
+                                    waitForUpOrCancellation()
+                                    val pressDuration = System.currentTimeMillis() - pressStart
+                                    viewModel.setShowOriginal(false)
+
+                                    // Long press → just viewing original, skip double-tap check
+                                    if (pressDuration >= 300L) return@awaitEachGesture
+
+                                    // Wait for a second tap within 300 ms
+                                    val secondDown = withTimeoutOrNull(300L) {
+                                        awaitFirstDown(requireUnconsumed = false)
+                                    } ?: return@awaitEachGesture
+
+                                    // Double tap: reset zoom
+                                    zoom = 1f
+                                    zoomOffset = Offset.Zero
+                                    waitForUpOrCancellation()
+                                }
                             },
                     )
                     } // end AnimatedContent
@@ -269,17 +307,41 @@ fun EditorScreen(
                             strokeWidth = 2.dp,
                         )
                     }
-                    // Histogram toggle button (top-right)
-                    IconButton(
-                        onClick  = viewModel::toggleHistogram,
-                        modifier = Modifier.align(Alignment.TopEnd).padding(4.dp).size(32.dp),
-                    ) {
-                        Icon(
-                            imageVector        = Icons.Default.BarChart,
-                            contentDescription = "Toggle histogram",
-                            tint               = if (uiState.showHistogram) MaterialTheme.colorScheme.primary
-                                                 else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                    // Grid overlay
+                    if (uiState.gridMode != GridMode.NONE) {
+                        GridOverlay(
+                            gridMode = uiState.gridMode,
+                            modifier = Modifier.fillMaxSize(),
                         )
+                    }
+                    // Top-right overlay buttons: grid + histogram
+                    Row(
+                        modifier          = Modifier.align(Alignment.TopEnd).padding(4.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        IconButton(
+                            onClick  = viewModel::cycleGridMode,
+                            modifier = Modifier.size(32.dp),
+                        ) {
+                            Icon(
+                                imageVector        = Icons.Default.GridOn,
+                                contentDescription = "Toggle grid",
+                                tint               = if (uiState.gridMode != GridMode.NONE)
+                                                         MaterialTheme.colorScheme.primary
+                                                     else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                            )
+                        }
+                        IconButton(
+                            onClick  = viewModel::toggleHistogram,
+                            modifier = Modifier.size(32.dp),
+                        ) {
+                            Icon(
+                                imageVector        = Icons.Default.BarChart,
+                                contentDescription = "Toggle histogram",
+                                tint               = if (uiState.showHistogram) MaterialTheme.colorScheme.primary
+                                                     else MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f),
+                            )
+                        }
                     }
                     // Histogram overlay (bottom-left)
                     if (uiState.showHistogram) {
@@ -400,6 +462,21 @@ fun EditorScreen(
                     presetName = preset.name,
                     onConfirm  = { viewModel.confirmApplyBatch(preset) },
                     onSkip     = viewModel::skipApplyBatch,
+                )
+            }
+
+            if (uiState.showExitConfirmDialog) {
+                ExitWithExportsDialog(
+                    pendingCount = uiState.pendingExportCount,
+                    onBackground = {
+                        viewModel.runExportsInBackground()
+                        activity?.moveTaskToBack(true)
+                    },
+                    onClose  = {
+                        viewModel.dismissExitDialog()
+                        activity?.finish()
+                    },
+                    onWait   = viewModel::dismissExitDialog,
                 )
             }
         }
@@ -1242,6 +1319,74 @@ private fun HistogramOverlay(bitmap: Bitmap, modifier: Modifier = Modifier) {
             }
         }
     }
+}
+
+// ── Grid overlay ───────────────────────────────────────────────────────────────
+
+@Composable
+private fun GridOverlay(gridMode: GridMode, modifier: Modifier = Modifier) {
+    val lineColor = Color.White.copy(alpha = 0.45f)
+    Canvas(modifier = modifier) {
+        when (gridMode) {
+            GridMode.THIRDS -> drawGrid(3, lineColor)
+            GridMode.NINTHS -> drawGrid(9, lineColor)
+            GridMode.GOLDEN -> {
+                val phi = 0.6180339887f
+                val a   = 1f - phi   // ≈ 0.382
+                listOf(a, phi).forEach { t ->
+                    drawLine(lineColor, Offset(size.width * t, 0f),
+                        Offset(size.width * t, size.height), strokeWidth = 1.dp.toPx())
+                    drawLine(lineColor, Offset(0f, size.height * t),
+                        Offset(size.width, size.height * t), strokeWidth = 1.dp.toPx())
+                }
+            }
+            GridMode.NONE -> Unit
+        }
+    }
+}
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.drawGrid(
+    divisions: Int,
+    color: Color,
+) {
+    val stroke = 1.dp.toPx()
+    for (i in 1 until divisions) {
+        val x = size.width  * i / divisions
+        val y = size.height * i / divisions
+        drawLine(color, Offset(x, 0f), Offset(x, size.height), strokeWidth = stroke)
+        drawLine(color, Offset(0f, y), Offset(size.width, y),  strokeWidth = stroke)
+    }
+}
+
+// ── Exit-with-pending-exports dialog ──────────────────────────────────────────
+
+@Composable
+private fun ExitWithExportsDialog(
+    pendingCount: Int,
+    onBackground: () -> Unit,
+    onClose: () -> Unit,
+    onWait: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onWait,
+        title = { Text("Exports in progress") },
+        text  = {
+            Text(
+                "$pendingCount export${if (pendingCount > 1) "s" else ""} still running.\n\n" +
+                "Run in background — the app will close itself once finished.\n" +
+                "Or wait here until they complete.",
+            )
+        },
+        confirmButton = {
+            Button(onClick = onBackground) { Text("Run in background") }
+        },
+        dismissButton = {
+            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                TextButton(onClick = onClose) { Text("Close anyway") }
+                TextButton(onClick = onWait)  { Text("Wait") }
+            }
+        },
+    )
 }
 
 @Preview(showBackground = true)
