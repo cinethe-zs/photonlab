@@ -140,7 +140,7 @@ class EditPipeline @Inject constructor(
         runtimeShader.setFloatUniform("highlights",  state.highlights / 200f)
         runtimeShader.setFloatUniform("shadows",     state.shadows / 200f)
         runtimeShader.setFloatUniform("saturation",
-            if (state.saturation >= 0f) state.saturation / 500f else state.saturation / 200f)
+            if (state.saturation >= 0f) state.saturation / 500f else state.saturation / 100f)
         runtimeShader.setFloatUniform("vibrance",    state.vibrance / 100f)
         runtimeShader.setFloatUniform("temperature", state.temperature / 100f)
         runtimeShader.setFloatUniform("tint",        state.tint / 100f)
@@ -170,7 +170,7 @@ class EditPipeline @Inject constructor(
         val luminosity  = state.luminosity / 200f
         val contrast    = state.contrast / 100f
         val saturation  = if (state.saturation >= 0f) state.saturation / 500f
-                          else state.saturation / 200f
+                          else state.saturation / 100f
         val vibrance    = state.vibrance / 100f
         val temperature = state.temperature / 100f
         val tint        = state.tint / 100f
