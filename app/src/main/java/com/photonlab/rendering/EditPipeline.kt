@@ -140,7 +140,7 @@ class EditPipeline @Inject constructor(
         runtimeShader.setFloatUniform("highlights",  state.highlights / 200f)
         runtimeShader.setFloatUniform("shadows",     state.shadows / 200f)
         runtimeShader.setFloatUniform("saturation",
-            if (state.saturation >= 0f) state.saturation / 200f else state.saturation / 100f)
+            if (state.saturation >= 0f) state.saturation / 500f else state.saturation / 200f)
         runtimeShader.setFloatUniform("vibrance",    state.vibrance / 100f)
         runtimeShader.setFloatUniform("temperature", state.temperature / 100f)
         runtimeShader.setFloatUniform("tint",        state.tint / 100f)
@@ -169,8 +169,8 @@ class EditPipeline @Inject constructor(
         val exposure    = state.exposure
         val luminosity  = state.luminosity / 200f
         val contrast    = state.contrast / 100f
-        val saturation  = if (state.saturation >= 0f) state.saturation / 200f
-                          else state.saturation / 100f
+        val saturation  = if (state.saturation >= 0f) state.saturation / 500f
+                          else state.saturation / 200f
         val vibrance    = state.vibrance / 100f
         val temperature = state.temperature / 100f
         val tint        = state.tint / 100f
@@ -254,9 +254,9 @@ class EditPipeline @Inject constructor(
                     val s     = delta / (1f - abs(2f * l - 1f))
                     var newS  = (s + saturation).coerceIn(0f, 1f)
                     newS = if (vibrance >= 0f)
-                        (newS + vibrance * 0.65f * (1f - newS) * (1f - newS * 0.5f)).coerceIn(0f, 1f)
+                        (newS + vibrance * 0.35f * (1f - newS) * (1f - newS * 0.5f)).coerceIn(0f, 1f)
                     else
-                        (newS * (1f + vibrance * 0.65f)).coerceIn(0f, 1f)
+                        (newS * (1f + vibrance * 0.35f)).coerceIn(0f, 1f)
                     val hRaw = when (maxC) {
                         r    -> (g - b) / delta
                         g    -> (b - r) / delta + 2f
