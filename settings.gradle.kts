@@ -21,3 +21,4 @@ dependencyResolutionManagement {
 
 rootProject.name = "photonlab"
 include(":app")
+include(":desktop")
