@@ -22,8 +22,19 @@ compose.desktop {
             vendor = "PhotonLab"
 
             linux {
-                iconFile.set(project.file("src/main/resources/icon.png"))
             }
+        }
+    }
+}
+
+// Redirect KMP metadata artifacts (only on blocked Google Maven) to their
+// JVM-specific counterparts, which are available on Maven Central.
+configurations.all {
+    resolutionStrategy.eachDependency {
+        val jvmOnlyGroups = setOf("androidx.annotation", "androidx.collection", "androidx.lifecycle")
+        val jvmSuffixNames = setOf("annotation", "collection", "lifecycle-common", "lifecycle-runtime")
+        if (requested.group in jvmOnlyGroups && requested.name in jvmSuffixNames) {
+            useTarget("${requested.group}:${requested.name}-jvm:${requested.version}")
         }
     }
 }

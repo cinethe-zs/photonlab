@@ -5,7 +5,6 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
 import androidx.compose.ui.window.rememberWindowState
-import com.photonlab.rendering.GlslToneRenderer
 import com.photonlab.ui.editor.EditorViewModel
 import com.photonlab.ui.theme.PhotonLabTheme
 import java.awt.datatransfer.DataFlavor
@@ -24,7 +23,7 @@ fun main() = application {
                 // Prompt user — dialog shown inside EditorScreen via closeWindow state
                 viewModel.requestExit()
             } else {
-                GlslToneRenderer.destroy()
+                viewModel.onCleared()
                 exitApplication()
             }
         },
@@ -61,7 +60,7 @@ fun main() = application {
             com.photonlab.ui.editor.EditorScreen(
                 viewModel = viewModel,
                 onCloseWindow = {
-                    GlslToneRenderer.destroy()
+                    viewModel.onCleared()
                     exitApplication()
                 },
             )

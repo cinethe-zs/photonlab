@@ -43,6 +43,7 @@ import com.photonlab.domain.model.LutFile
 import com.photonlab.platform.DesktopBitmap
 import com.photonlab.platform.DesktopFilePicker
 import com.photonlab.ui.components.AdjustmentSlider
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withTimeoutOrNull
 import kotlin.math.abs
 import kotlin.math.ln
