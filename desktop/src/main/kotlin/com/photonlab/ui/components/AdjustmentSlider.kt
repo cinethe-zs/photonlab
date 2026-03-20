@@ -3,6 +3,7 @@ package com.photonlab.ui.components
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
+import androidx.compose.foundation.gestures.awaitFirstDown
 import androidx.compose.foundation.layout.*
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Refresh
@@ -91,9 +92,9 @@ private fun StepSlider(
             .pointerInput(valueRange, step) {
                 val touchSlop = viewConfiguration.touchSlop
                 awaitEachGesture {
-                    val firstEvent = awaitPointerEvent()
-                    val startX = firstEvent.changes.firstOrNull()?.position?.x ?: return@awaitEachGesture
-                    firstEvent.changes.forEach { it.consume() }
+                    val firstDown = awaitFirstDown(requireUnconsumed = false)
+                    val startX = firstDown.position.x
+                    firstDown.consume()
                     var dragging = false
                     while (true) {
                         val event = awaitPointerEvent()

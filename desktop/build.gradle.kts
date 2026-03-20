@@ -15,24 +15,52 @@ compose.desktop {
         mainClass = "com.photonlab.MainKt"
 
         nativeDistributions {
-            targetFormats(TargetFormat.Deb, TargetFormat.AppImage)
+            // Output to TEMP so Windows Defender/Search Indexer never hold a handle on the exe dir.
+            outputBaseDir.set(project.objects.directoryProperty().apply {
+                set(File(System.getProperty("java.io.tmpdir"), "photonlab-build5"))
+            })
+            targetFormats(TargetFormat.Deb, TargetFormat.AppImage, TargetFormat.Exe)
             packageName = "photonlab"
-            packageVersion = "1.2.1"
-            description = "PhotonLab — Non-destructive photo editor"
+            packageVersion = "1.2.2"
+            description = "PhotonLab - Non-destructive photo editor"
             vendor = "PhotonLab"
 
+            val appIcon = project.file("src/main/resources/photonlab.ico")
+            fileAssociation("image/jpeg",              "jpg",  "JPEG Image",  appIcon)
+            fileAssociation("image/jpeg",              "jpeg", "JPEG Image",  appIcon)
+            fileAssociation("image/png",               "png",  "PNG Image",   appIcon)
+            fileAssociation("image/webp",              "webp", "WebP Image",  appIcon)
+            fileAssociation("application/octet-stream","cube", "3D LUT File", appIcon)
+
+            modules("jdk.unsupported", "java.management", "jdk.unsupported.desktop")
+
+            windows {
+                iconFile.set(project.file("src/main/resources/photonlab.ico"))
+                dirChooser = true
+                perUserInstall = true
+                shortcut = true
+                menuGroup = "PhotonLab"
+                upgradeUuid = "C7E4A2B1-8D6F-4E3A-9B2C-1A2B3C4D5E6F"
+            }
+
             linux {
+                iconFile.set(project.file("src/main/resources/photonlab_icon.png"))
+                menuGroup = "Graphics"
+                shortcut = true
             }
         }
     }
 }
+
 
 // Redirect KMP metadata artifacts (only on blocked Google Maven) to their
 // JVM-specific counterparts, which are available on Maven Central.
 configurations.all {
     resolutionStrategy.eachDependency {
         val jvmOnlyGroups = setOf("androidx.annotation", "androidx.collection", "androidx.lifecycle")
-        val jvmSuffixNames = setOf("annotation", "collection", "lifecycle-common", "lifecycle-runtime")
+        // "lifecycle-runtime-jvm" does not exist on any Maven repo; keep only artifacts
+        // that actually have a published -jvm variant on Google Maven.
+        val jvmSuffixNames = setOf("annotation", "collection", "lifecycle-common")
         if (requested.group in jvmOnlyGroups && requested.name in jvmSuffixNames) {
             useTarget("${requested.group}:${requested.name}-jvm:${requested.version}")
         }
@@ -40,7 +68,10 @@ configurations.all {
 }
 
 val lwjglVersion = libs.versions.lwjgl.get()
-val lwjglNatives = "natives-linux"
+val lwjglNatives = when {
+    System.getProperty("os.name").startsWith("Windows") -> "natives-windows"
+    else -> "natives-linux"
+}
 
 dependencies {
     // Compose Multiplatform Desktop
@@ -53,6 +84,9 @@ dependencies {
 
     // JSON (preset persistence)
     implementation("org.json:json:20231013")
+
+    // EXIF metadata reading (date imprint)
+    implementation("com.drewnoakes:metadata-extractor:2.19.0")
 
     // LWJGL (OpenGL off-screen rendering)
     implementation(libs.lwjgl.core)

@@ -26,21 +26,30 @@ object DesktopFilePicker {
         n.endsWith(".cube") || n.endsWith(".png") || n.endsWith(".tiff") || n.endsWith(".tif")
     }
 
-    /** Show a multi-select file dialog for images. Returns chosen files, or empty if cancelled. */
+    /** Show a multi-select file dialog for images. Returns chosen files, or empty if cancelled.
+     *  Remembers the last used directory independently from the LUT dialog. */
     suspend fun pickImageFiles(parentFrame: Frame? = null): List<File> = withContext(Dispatchers.Main) {
+        val lastDir = DesktopPreferences.getString("last_image_dir", "")
         val dialog = FileDialog(parentFrame, "Open Images", FileDialog.LOAD).apply {
             isMultipleMode = true
             filenameFilter = imageFilter
+            if (lastDir.isNotEmpty()) directory = lastDir
         }
         dialog.isVisible = true
-        dialog.files?.toList() ?: emptyList()
+        val files = dialog.files?.toList() ?: emptyList()
+        if (files.isNotEmpty()) {
+            files.first().parent?.let { DesktopPreferences.putString("last_image_dir", it) }
+        }
+        files
     }
 
-    /** Show a single-file dialog for a LUT file (.cube, .png). Returns null if cancelled. */
-    suspend fun pickLutFile(parentFrame: Frame? = null): File? = withContext(Dispatchers.Main) {
+    /** Show a single-file dialog for a LUT file (.cube, .png).
+     *  Always opens at [lutFolder] when provided. Returns null if cancelled. */
+    suspend fun pickLutFile(lutFolder: String = "", parentFrame: Frame? = null): File? = withContext(Dispatchers.Main) {
         val dialog = FileDialog(parentFrame, "Open LUT File", FileDialog.LOAD).apply {
             isMultipleMode = false
             filenameFilter = lutFilter
+            if (lutFolder.isNotEmpty()) directory = lutFolder
         }
         dialog.isVisible = true
         dialog.files?.firstOrNull()

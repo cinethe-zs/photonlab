@@ -33,11 +33,14 @@ data class EditState(
     // Detail
     val sharpening: Float = 0f,              // 0 .. 100
     val noise: Float = 0f,                   // -100 (denoise) .. +100 (grain)
+    // Date imprint
+    val dateImprint: DateImprintSettings = DateImprintSettings(),
 ) {
     val isDefault: Boolean
         get() = exposure == 0f && luminosity == 0f && contrast == 0f &&
                 highlights == 0f && shadows == 0f && saturation == 0f &&
                 vibrance == 0f && temperature == 0f && tint == 0f &&
                 lutPath.isEmpty() && rotation == 0 && fineRotation == 0f &&
-                cropRect == null && !frameEnabled && sharpening == 0f && noise == 0f
+                cropRect == null && !frameEnabled && sharpening == 0f && noise == 0f &&
+                !dateImprint.enabled
 }

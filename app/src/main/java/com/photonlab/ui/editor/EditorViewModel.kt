@@ -8,10 +8,19 @@ import android.net.Uri
 import android.os.Build
 import android.os.Environment
 import android.provider.MediaStore
+import androidx.exifinterface.media.ExifInterface
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
 import com.photonlab.data.repository.LutRepository
 import com.photonlab.domain.EditHistoryManager
+import com.photonlab.domain.model.DateImprintColor
+import com.photonlab.domain.model.DateImprintFont
+import com.photonlab.domain.model.DateImprintPosition
+import com.photonlab.domain.model.DateImprintSettings
+import com.photonlab.domain.model.DateImprintStyle
 import com.photonlab.domain.model.EditState
 import com.photonlab.domain.model.LutFile
 import com.photonlab.domain.model.LutType
@@ -57,7 +66,8 @@ enum class PresetParam(val label: String) {
     NOISE("Noise"),
     ROTATION("Rotation"),
     LUT("LUT"),
-    FRAME("Frame");
+    FRAME("Frame"),
+    DATE_IMPRINT("Date Imprint");
 
     companion object {
         val ALL: Set<PresetParam> get() = entries.toSet()
@@ -112,6 +122,8 @@ data class EditorUiState(
     val histogramBitmap: Bitmap? = null,  // quick render WITHOUT frame (for accurate histogram)
     // Grid overlay
     val gridMode: GridMode = GridMode.NONE,
+    // Photo date (from EXIF — used for date imprint preview and rendering)
+    val photoDate: Date? = null,
     // Export / exit
     val pendingExportCount: Int = 0,
     val showExitConfirmDialog: Boolean = false,
@@ -120,7 +132,7 @@ data class EditorUiState(
 
 // ── Export job ────────────────────────────────────────────────────────────────
 
-private data class ExportJob(val bitmap: Bitmap, val state: EditState, val lut: LutFile?, val quality: Int)
+private data class ExportJob(val bitmap: Bitmap, val state: EditState, val lut: LutFile?, val quality: Int, val date: Date = Date())
 
 // ── ViewModel ─────────────────────────────────────────────────────────────────
 
@@ -165,7 +177,7 @@ class EditorViewModel @Inject constructor(
                 val count = pendingExports.incrementAndGet()
                 _uiState.update { it.copy(pendingExportCount = count) }
                 runCatching {
-                    val processed = withContext(Dispatchers.Default) { pipeline.process(job.bitmap, job.state, job.lut) }
+                    val processed = withContext(Dispatchers.Default) { pipeline.process(job.bitmap, job.state, job.lut, job.date) }
                     saveToMediaStore(processed, job.quality)
                     _uiState.update { it.copy(snackbarMessage = "Saved") }
                 }.onFailure { err ->
@@ -238,6 +250,8 @@ class EditorViewModel @Inject constructor(
                 BitmapFactory.decodeStream(stream)
             }?.toSoftware() ?: return@launch
 
+            val photoDate = readExifDate(uri)
+
             quickSourceBitmap   = downsampleBitmap(bitmap, 512)
             previewSourceBitmap = downsampleBitmap(bitmap, 1280)
             history.reset(initialState)
@@ -249,6 +263,7 @@ class EditorViewModel @Inject constructor(
                     cropSourceBitmap    = null,
                     editState           = initialState,
                     currentLut          = initialLut,
+                    photoDate           = photoDate,
                     canUndo             = false,
                     canRedo             = false,
                     historyEntries      = listOf(initialState),
@@ -258,6 +273,41 @@ class EditorViewModel @Inject constructor(
             }
             scheduleRender(initialState, immediate = true)
         }
+    }
+
+    private fun readExifDate(uri: Uri): Date? = runCatching {
+        context.contentResolver.openInputStream(uri)?.use { stream ->
+            val exif = ExifInterface(stream)
+            val tz = java.util.TimeZone.getDefault()
+            val tags = listOf(
+                ExifInterface.TAG_DATETIME_ORIGINAL,
+                ExifInterface.TAG_DATETIME_DIGITIZED,
+                ExifInterface.TAG_DATETIME,
+            )
+            for (tag in tags) {
+                val raw = exif.getAttribute(tag) ?: continue
+                parseExifDate(raw, tz)?.let { return@runCatching it }
+            }
+            null
+        }
+    }.getOrNull()
+
+    private fun parseExifDate(raw: String, tz: java.util.TimeZone): Date? {
+        val s = raw.trim()
+        if (s.isEmpty() || s == "0000:00:00 00:00:00") return null
+        val formats = listOf(
+            "yyyy:MM:dd HH:mm:ss",
+            "yyyy-MM-dd HH:mm:ss",
+            "yyyy-MM-dd'T'HH:mm:ss",
+            "yyyy:MM:dd",
+            "yyyy-MM-dd",
+        )
+        for (fmt in formats) {
+            runCatching {
+                SimpleDateFormat(fmt, Locale.US).also { it.timeZone = tz }.parse(s)
+            }.getOrNull()?.let { return it }
+        }
+        return null
     }
 
     private fun downsampleBitmap(src: Bitmap, maxPx: Int): Bitmap {
@@ -295,6 +345,18 @@ class EditorViewModel @Inject constructor(
     fun setFrameColor(v: Int)       = updateEdit { it.copy(frameColor   = v) }
     fun setFrameRatio(v: Float)     = updateEdit { it.copy(frameRatio   = v) }
     fun setFrameSizePct(v: Float)   = updateEdit(paramKey = "frameSizePct") { it.copy(frameSizePct = v) }
+
+    // Date imprint
+    fun setDateImprintEnabled(v: Boolean)        = updateEdit { it.copy(dateImprint = it.dateImprint.copy(enabled = v)) }
+    fun cycleDataImprintStyle()                  = updateEdit { it.copy(dateImprint = it.dateImprint.copy(style = it.dateImprint.style.next())) }
+    fun setDateImprintColor(v: DateImprintColor) = updateEdit { it.copy(dateImprint = it.dateImprint.copy(color = v)) }
+    fun setDateImprintFont(v: DateImprintFont)   = updateEdit { it.copy(dateImprint = it.dateImprint.copy(font = v)) }
+    fun setDateImprintPosition(v: DateImprintPosition) = updateEdit { it.copy(dateImprint = it.dateImprint.copy(position = v)) }
+    fun setDateImprintSize(v: Float)  = updateEdit(paramKey = "diSize")    { it.copy(dateImprint = it.dateImprint.copy(sizePercent = v)) }
+    fun setDateImprintGlow(v: Float)  = updateEdit(paramKey = "diGlow")    { it.copy(dateImprint = it.dateImprint.copy(glowAmount = v.toInt())) }
+    fun setDateImprintBlur(v: Float)  = updateEdit(paramKey = "diBlur")    { it.copy(dateImprint = it.dateImprint.copy(blurAmount = v.toInt())) }
+    fun setDateImprintOpacity(v: Float) = updateEdit(paramKey = "diOpacity") { it.copy(dateImprint = it.dateImprint.copy(opacity = v.toInt())) }
+    fun setDateImprintRepeat(v: Float) = updateEdit(paramKey = "diRepeat") { it.copy(dateImprint = it.dateImprint.copy(blurRepeat = v.toInt())) }
 
     private fun updateEdit(immediate: Boolean = false, paramKey: String? = null, transform: (EditState) -> EditState) {
         val newState = transform(_uiState.value.editState)
@@ -578,6 +640,7 @@ class EditorViewModel @Inject constructor(
             frameRatio   = s.frameRatio,
             frameSizePct = s.frameSizePct,
         )
+        if (PresetParam.DATE_IMPRINT in p) r = r.copy(dateImprint = s.dateImprint)
         // LUT is handled separately via currentLut (see applyPresetNow)
         return r
     }
@@ -599,7 +662,7 @@ class EditorViewModel @Inject constructor(
         val quality = _uiState.value.jpegQuality
 
         // Enqueue export job — processed sequentially in the background
-        exportChannel.trySend(ExportJob(src, state, lut, quality))
+        exportChannel.trySend(ExportJob(src, state, lut, quality, _uiState.value.photoDate ?: Date()))
 
         // Navigate to next image immediately without waiting for the save
         if (batchIndex < batchUris.size - 1) {
@@ -625,6 +688,34 @@ class EditorViewModel @Inject constructor(
         } else {
             resetToEmpty()
         }
+    }
+
+    /** Export every image in the batch using its saved edits (or pending preset), then clear the UI. */
+    fun exportAll() {
+        if (batchUris.isEmpty()) return
+        saveSnapshot()
+        val uris      = batchUris.toList()
+        val snapshots = batchSnapshots.toMap()
+        val pending   = _uiState.value.pendingPreset
+        val quality   = _uiState.value.jpegQuality
+        viewModelScope.launch(Dispatchers.IO) {
+            uris.forEachIndexed { index, uri ->
+                val (state, lut) = when {
+                    snapshots.containsKey(index) -> snapshots[index]!!
+                    pending != null -> Pair(
+                        applyPresetToState(pending, EditState()),
+                        if (PresetParam.LUT in pending.includedParams) pending.lut else null,
+                    )
+                    else -> Pair(EditState(), null)
+                }
+                val bitmap = context.contentResolver.openInputStream(uri)?.use { stream ->
+                    BitmapFactory.decodeStream(stream)
+                }?.toSoftware() ?: return@forEachIndexed
+                val photoDate = readExifDate(uri)
+                exportChannel.trySend(ExportJob(bitmap, state, lut, quality, photoDate ?: Date()))
+            }
+        }
+        resetToEmpty("Saving ${uris.size} image${if (uris.size > 1) "s" else ""} in background…")
     }
 
     private fun resetToEmpty(snackbar: String? = null) {
@@ -661,6 +752,7 @@ class EditorViewModel @Inject constructor(
     private fun scheduleRender(state: EditState, immediate: Boolean = false) {
         renderJob?.cancel()
         renderJob = viewModelScope.launch {
+            val date = _uiState.value.photoDate ?: Date()
             // Immediate quick render (512px)
             // processAll() returns (framed, preFrame) in one pipeline run — preFrame is
             // used as histogramBitmap so border pixels never contaminate the histogram.
@@ -668,7 +760,7 @@ class EditorViewModel @Inject constructor(
             if (quick != null) {
                 val lut = _uiState.value.currentLut
                 val (q, histo) = withContext(Dispatchers.Default) {
-                    pipeline.processAll(quick, state, lut)
+                    pipeline.processAll(quick, state, lut, date)
                 }
                 _uiState.update { it.copy(previewBitmap = q, histogramBitmap = histo) }
             }
@@ -677,7 +769,7 @@ class EditorViewModel @Inject constructor(
             val src = previewSourceBitmap ?: return@launch
             val lut = _uiState.value.currentLut
             _uiState.update { it.copy(isProcessing = true) }
-            val preview = withContext(Dispatchers.Default) { pipeline.process(src, state, lut) }
+            val preview = withContext(Dispatchers.Default) { pipeline.process(src, state, lut, date) }
             _uiState.update { it.copy(previewBitmap = preview, isProcessing = false) }
         }
         // Always update the geometry-only preview (for hold-to-compare)
@@ -760,6 +852,18 @@ class EditorViewModel @Inject constructor(
                     put("frameRatio",     s.frameRatio.toDouble())
                     put("frameSizePct",   s.frameSizePct.toDouble())
                     put("includedParams", paramsArr)
+                    // Date imprint
+                    val di = s.dateImprint
+                    put("diEnabled",  di.enabled)
+                    put("diStyle",    di.style.name)
+                    put("diColor",    di.color.name)
+                    put("diFont",     di.font.name)
+                    put("diSizePct",  di.sizePercent.toDouble())
+                    put("diPosition", di.position.name)
+                    put("diGlow",     di.glowAmount)
+                    put("diBlur",     di.blurAmount)
+                    put("diOpacity",  di.opacity)
+                    put("diRepeat",   di.blurRepeat)
                     // Persist LUT by copying its parsed float data to internal storage
                     val lut = p.lut
                     if (lut != null) {
@@ -811,6 +915,18 @@ class EditorViewModel @Inject constructor(
                     frameColor   = obj.optInt("frameColor", 0xFFFFFFFF.toInt()),
                     frameRatio   = obj.optDouble("frameRatio", 0.0).toFloat(),
                     frameSizePct = obj.optDouble("frameSizePct", 3.0).toFloat(),
+                    dateImprint  = DateImprintSettings(
+                        enabled     = obj.optBoolean("diEnabled", false),
+                        style       = runCatching { DateImprintStyle.valueOf(obj.optString("diStyle", "CLASSIC")) }.getOrDefault(DateImprintStyle.CLASSIC),
+                        color       = runCatching { DateImprintColor.valueOf(obj.optString("diColor", "AMBER")) }.getOrDefault(DateImprintColor.AMBER),
+                        font        = runCatching { DateImprintFont.valueOf(obj.optString("diFont", "LED")) }.getOrDefault(DateImprintFont.LED),
+                        sizePercent = obj.optDouble("diSizePct", 2.0).toFloat(),
+                        position    = runCatching { DateImprintPosition.valueOf(obj.optString("diPosition", "BOTTOM_RIGHT")) }.getOrDefault(DateImprintPosition.BOTTOM_RIGHT),
+                        glowAmount  = obj.optInt("diGlow", 100),
+                        blurAmount  = obj.optInt("diBlur", 50),
+                        opacity     = obj.optInt("diOpacity", 50),
+                        blurRepeat  = obj.optInt("diRepeat", 3),
+                    ),
                 )
                 val paramsArr = obj.optJSONArray("includedParams")
                 val includedParams: Set<PresetParam> = if (paramsArr != null) {

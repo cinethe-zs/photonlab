@@ -10,6 +10,8 @@ import org.lwjgl.opengl.GL12.GL_BGRA
 import org.lwjgl.opengl.GL12.GL_UNSIGNED_INT_8_8_8_8_REV
 import org.lwjgl.opengl.GL20.*
 import org.lwjgl.opengl.GL30.*
+import org.lwjgl.opengl.GL33.glBindVertexArray
+import org.lwjgl.opengl.GL33.glGenVertexArrays
 import org.lwjgl.system.MemoryUtil.NULL
 import java.nio.ByteBuffer
 import java.nio.ByteOrder
@@ -43,6 +45,7 @@ class GlslToneRenderer {
     private var fboTexId     = 0
     private var fboW         = 0
     private var fboH         = 0
+    private var vaoId        = 0
 
     // Uniform locations
     private var uExposure    = -1
@@ -89,6 +92,7 @@ class GlslToneRenderer {
         glExecutor.submit {
             if (initialised.get()) {
                 glfwMakeContextCurrent(glfwWindow)
+                if (vaoId    != 0) glDeleteVertexArrays(vaoId)
                 if (texId    != 0) glDeleteTextures(texId)
                 if (fboTexId != 0) glDeleteTextures(fboTexId)
                 if (fboId    != 0) glDeleteFramebuffers(fboId)
@@ -149,6 +153,11 @@ class GlslToneRenderer {
             uTemperature = glGetUniformLocation(shaderProg, "temperature")
             uTint        = glGetUniformLocation(shaderProg, "tint")
             uInputImage  = glGetUniformLocation(shaderProg, "inputImage")
+
+            // OpenGL 3.3 Core Profile requires a VAO bound for any draw call,
+            // even when no vertex attributes are used (gl_VertexID only).
+            vaoId = glGenVertexArrays()
+            glBindVertexArray(vaoId)
 
             // Source image texture (slot 0)
             texId = glGenTextures()

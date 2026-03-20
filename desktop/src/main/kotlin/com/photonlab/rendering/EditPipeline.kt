@@ -24,21 +24,24 @@ class EditPipeline {
 
     // ── Public API ─────────────────────────────────────────────────────────
 
-    fun process(source: DesktopBitmap, state: EditState, lut: LutFile?): DesktopBitmap {
-        val preFrame = processUpToFrame(source, state, lut)
+    fun process(source: DesktopBitmap, state: EditState, lut: LutFile?, photoDate: java.util.Date? = null): DesktopBitmap {
+        val preFrame = processUpToFrame(source, state, lut, photoDate)
         return if (state.frameEnabled) applyFrame(preFrame, state) else preFrame
     }
 
-    fun processAll(source: DesktopBitmap, state: EditState, lut: LutFile?): Pair<DesktopBitmap, DesktopBitmap> {
-        val preFrame = processUpToFrame(source, state, lut)
+    fun processAll(source: DesktopBitmap, state: EditState, lut: LutFile?, photoDate: java.util.Date? = null): Pair<DesktopBitmap, DesktopBitmap> {
+        val preFrame = processUpToFrame(source, state, lut, photoDate)
         return if (state.frameEnabled) Pair(applyFrame(preFrame, state), preFrame)
                else Pair(preFrame, preFrame)
     }
 
-    fun processUpToFrame(source: DesktopBitmap, state: EditState, lut: LutFile?): DesktopBitmap {
+    fun processUpToFrame(source: DesktopBitmap, state: EditState, lut: LutFile?, photoDate: java.util.Date? = null): DesktopBitmap {
         val rotated     = applyRotation(source, state.rotation)
         val fineRotated = applyFineRotation(rotated, state.fineRotation)
-        val toneAdj     = applyTone(fineRotated, state)
+        val imprinted   = if (state.dateImprint.enabled && photoDate != null)
+            DateImprintProcessor.burn(fineRotated, state.dateImprint, photoDate)
+        else fineRotated
+        val toneAdj     = applyTone(imprinted, state)
         val lutApplied  = if (lut != null) applyLut(toneAdj, lut) else toneAdj
         val sharpened   = if (state.sharpening > 0f) applySharpening(lutApplied, state.sharpening) else lutApplied
         val noised      = if (state.noise != 0f) applyNoise(sharpened, state.noise) else sharpened

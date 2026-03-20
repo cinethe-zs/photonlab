@@ -1,6 +1,7 @@
 package com.photonlab
 
 import androidx.compose.runtime.*
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.window.Window
 import androidx.compose.ui.window.application
@@ -28,6 +29,7 @@ fun main() = application {
             }
         },
         title = "PhotonLab",
+        icon = painterResource("photonlab_icon.png"),
         state = rememberWindowState(width = 1280.dp, height = 800.dp),
     ) {
         // Register drag-and-drop on the AWT ComposeWindow

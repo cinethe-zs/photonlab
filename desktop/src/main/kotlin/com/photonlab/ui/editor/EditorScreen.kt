@@ -16,6 +16,7 @@ import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.*
@@ -30,6 +31,14 @@ import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.painter.BitmapPainter
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.pointer.PointerEventType
 import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.layout.onSizeChanged
@@ -38,6 +47,11 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
+import com.photonlab.domain.model.DateImprintColor
+import com.photonlab.domain.model.DateImprintFont
+import com.photonlab.domain.model.DateImprintPosition
+import com.photonlab.domain.model.DateImprintSettings
+import com.photonlab.domain.model.DateImprintStyle
 import com.photonlab.domain.model.EditState
 import com.photonlab.domain.model.LutFile
 import com.photonlab.platform.DesktopBitmap
@@ -64,6 +78,26 @@ fun EditorScreen(
     var topBarHeightPx      by remember { mutableIntStateOf(0) }
     var bottomPanelHeightPx by remember { mutableIntStateOf(0) }
     val density = LocalDensity.current
+
+    val focusRequester = remember { FocusRequester() }
+    LaunchedEffect(boxSize) {
+        if (boxSize != IntSize.Zero) runCatching { focusRequester.requestFocus() }
+    }
+
+    fun zoomBy(factor: Float, anchor: Offset? = null) {
+        val newZoom = (zoom * factor).coerceIn(1f, 8f)
+        if (newZoom == zoom) return
+        val cx = boxSize.width / 2f
+        val cy = boxSize.height / 2f
+        val ax = anchor?.x ?: cx
+        val ay = anchor?.y ?: cy
+        val newOffX = (ax - cx) * (zoom - newZoom) + zoomOffset.x
+        val newOffY = (ay - cy) * (zoom - newZoom) + zoomOffset.y
+        val maxX = (boxSize.width  * (newZoom - 1)) / 2f
+        val maxY = (boxSize.height * (newZoom - 1)) / 2f
+        zoom = newZoom
+        zoomOffset = Offset(newOffX.coerceIn(-maxX, maxX), newOffY.coerceIn(-maxY, maxY))
+    }
 
     LaunchedEffect(uiState.sourceBitmap) { zoom = 1f; zoomOffset = Offset.Zero }
 
@@ -97,7 +131,18 @@ fun EditorScreen(
         snackbarHost   = { SnackbarHost(snackbarHostState) },
         containerColor = MaterialTheme.colorScheme.background,
     ) { padding ->
-        Box(modifier = Modifier.fillMaxSize().padding(padding)) {
+        Box(modifier = Modifier.fillMaxSize().padding(padding)
+            .focusRequester(focusRequester)
+            .focusable()
+            .onPreviewKeyEvent { event ->
+                if (event.type == KeyEventType.KeyDown) {
+                    when (event.key) {
+                        Key.Plus, Key.Equals, Key.NumPadAdd      -> { zoomBy(1.2f);        true }
+                        Key.Minus, Key.NumPadSubtract            -> { zoomBy(1f / 1.2f);   true }
+                        else -> false
+                    }
+                } else false
+            }) {
 
             // ── Full-screen image area ─────────────────────────────────────
             Box(
@@ -108,7 +153,22 @@ fun EditorScreen(
                         top    = with(density) { topBarHeightPx.toDp() },
                         bottom = with(density) { bottomPanelHeightPx.toDp() },
                     )
-                    .onSizeChanged { boxSize = it },
+                    .onSizeChanged { boxSize = it }
+                    .pointerInput(Unit) {
+                        awaitPointerEventScope {
+                            while (true) {
+                                val event = awaitPointerEvent()
+                                if (event.type == PointerEventType.Scroll) {
+                                    val scrollY = event.changes.fold(0f) { acc, c -> acc + c.scrollDelta.y }
+                                    if (scrollY != 0f) {
+                                        val factor = if (scrollY < 0) 1.1f else 1f / 1.1f
+                                        zoomBy(factor, event.changes.firstOrNull()?.position)
+                                        event.changes.forEach { it.consume() }
+                                    }
+                                }
+                            }
+                        }
+                    },
                 contentAlignment = Alignment.Center,
             ) {
                 val displayBitmap = when {
@@ -141,10 +201,9 @@ fun EditorScreen(
                                     if (uiState.batchCount <= 1) return@pointerInput
                                     val threshold = 80.dp.toPx()
                                     awaitEachGesture {
-                                        val firstEv = awaitPointerEvent()
-                                        val firstCh = firstEv.changes.firstOrNull() ?: return@awaitEachGesture
-                                        val startX  = firstCh.position.x
-                                        val startY  = firstCh.position.y
+                                        val firstDown = awaitFirstDown(requireUnconsumed = false)
+                                        val startX    = firstDown.position.x
+                                        val startY    = firstDown.position.y
                                         while (true) {
                                             val ev = awaitPointerEvent()
                                             val ch = ev.changes.firstOrNull() ?: break
@@ -252,6 +311,7 @@ fun EditorScreen(
                         onRedo       = viewModel::redo,
                         onReset      = viewModel::resetAll,
                         onExport     = viewModel::export,
+                        onExportAll  = viewModel::exportAll,
                         onSettings   = viewModel::openSettings,
                         onSkip       = viewModel::skipImage,
                         onHistory    = viewModel::openHistory,
@@ -273,7 +333,7 @@ fun EditorScreen(
                     ToolControls(
                         state       = uiState,
                         viewModel   = viewModel,
-                        onLutPick   = { scope.launch { DesktopFilePicker.pickLutFile()?.let { viewModel.importLut(it) } } },
+                        onLutPick   = { scope.launch { DesktopFilePicker.pickLutFile(uiState.lutFolder)?.let { viewModel.importLut(it) } } },
                         onStartCrop = viewModel::startCrop,
                     )
                 }
@@ -348,7 +408,7 @@ private fun TopBar(
     canHistory: Boolean, isProcessing: Boolean,
     batchCount: Int, batchIndex: Int,
     onOpen: () -> Unit, onUndo: () -> Unit, onRedo: () -> Unit,
-    onReset: () -> Unit, onExport: () -> Unit, onSettings: () -> Unit,
+    onReset: () -> Unit, onExport: () -> Unit, onExportAll: () -> Unit, onSettings: () -> Unit,
     onSkip: () -> Unit, onHistory: () -> Unit,
 ) {
     Row(modifier = Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -364,6 +424,7 @@ private fun TopBar(
         IconButton(onClick = onRedo, enabled = canRedo) { Icon(Icons.AutoMirrored.Filled.Redo, contentDescription = "Redo") }
         IconButton(onClick = onReset, enabled = hasImage) { Icon(Icons.Default.DeleteSweep, contentDescription = "Reset all") }
         FilledTonalIconButton(onClick = onExport, enabled = hasImage && !isProcessing) { Icon(Icons.Default.Save, contentDescription = "Export") }
+        FilledTonalIconButton(onClick = onExportAll, enabled = hasImage && !isProcessing) { Icon(Icons.Default.SaveAlt, contentDescription = "Save all") }
         IconButton(onClick = onSettings) { Icon(Icons.Default.Settings, contentDescription = "Settings") }
     }
 }
@@ -607,6 +668,7 @@ private fun PresetParam.displayValue(state: EditState, currentLutName: String?):
     PresetParam.ROTATION    -> "${"%.1f".format(state.rotation.toFloat() + state.fineRotation)}°"
     PresetParam.LUT         -> currentLutName ?: "applied"
     PresetParam.FRAME       -> "${state.frameSizePct.toInt()}%"
+    PresetParam.DATE_IMPRINT -> if (state.dateImprint.enabled) state.dateImprint.style.label else "Off"
 }
 
 private fun PresetParam.isNonDefault(state: EditState, hasLut: Boolean): Boolean = when (this) {
@@ -624,6 +686,7 @@ private fun PresetParam.isNonDefault(state: EditState, hasLut: Boolean): Boolean
     PresetParam.ROTATION    -> state.rotation    != 0 || state.fineRotation != 0f
     PresetParam.LUT         -> hasLut
     PresetParam.FRAME       -> state.frameEnabled
+    PresetParam.DATE_IMPRINT -> state.dateImprint.enabled
 }
 
 // ── Tool controls ──────────────────────────────────────────────────────────────
@@ -660,6 +723,21 @@ private fun ToolControls(state: EditorUiState, viewModel: EditorViewModel, onLut
                     SectionHeader("Frame")
                     FramePanel(state = e, onEnabled = viewModel::setFrameEnabled, onColor = viewModel::setFrameColor,
                         onRatio = viewModel::setFrameRatio, onSize = viewModel::setFrameSizePct)
+                    SectionHeader("Date Imprint")
+                    DateImprintPanel(
+                        settings       = e.dateImprint,
+                        photoDate      = state.photoDate,
+                        onEnabled      = viewModel::setDateImprintEnabled,
+                        onStyle        = viewModel::setDateImprintStyle,
+                        onColor        = viewModel::setDateImprintColor,
+                        onFont         = viewModel::setDateImprintFont,
+                        onSize         = viewModel::setDateImprintSize,
+                        onPosition     = viewModel::setDateImprintPosition,
+                        onGlow         = viewModel::setDateImprintGlow,
+                        onBlur         = viewModel::setDateImprintBlur,
+                        onOpacity      = viewModel::setDateImprintOpacity,
+                        onBlurRepeat   = viewModel::setDateImprintBlurRepeat,
+                    )
                 }
             }
             Spacer(Modifier.height(8.dp))
@@ -745,6 +823,96 @@ private fun FramePanel(state: EditState, onEnabled: (Boolean) -> Unit, onColor: 
                 }
             }
             AdjustmentSlider("Size", state.frameSizePct, 0f..30f, onSize, step = 0.5f)
+        }
+    }
+}
+
+// ── Date Imprint panel ────────────────────────────────────────────────────────
+
+@Composable
+private fun DateImprintPanel(
+    settings: DateImprintSettings,
+    photoDate: java.util.Date?,
+    onEnabled: (Boolean) -> Unit,
+    onStyle: (DateImprintStyle) -> Unit,
+    onColor: (DateImprintColor) -> Unit,
+    onFont: (DateImprintFont) -> Unit,
+    onSize: (Float) -> Unit,
+    onPosition: (DateImprintPosition) -> Unit,
+    onGlow: (Int) -> Unit,
+    onBlur: (Int) -> Unit,
+    onOpacity: (Int) -> Unit,
+    onBlurRepeat: (Int) -> Unit,
+) {
+    Column(modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Date imprint", style = MaterialTheme.typography.bodyMedium)
+                val dateLabel = when {
+                    photoDate != null -> settings.style.format(photoDate)
+                    else              -> "No EXIF date"
+                }
+                Text(dateLabel, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Switch(checked = settings.enabled, onCheckedChange = onEnabled)
+        }
+        if (settings.enabled) {
+            // Style selector — chips show example output (e.g. "24.12.95")
+            Text("Style", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
+            Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                DateImprintStyle.entries.forEach { style ->
+                    FilterChip(
+                        selected = settings.style == style,
+                        onClick  = { onStyle(style) },
+                        label    = { Text(style.label, style = MaterialTheme.typography.labelSmall) },
+                    )
+                }
+            }
+            // Color chips
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Color", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(64.dp))
+                Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    DateImprintColor.entries.forEach { c ->
+                        val awtColor = runCatching { java.awt.Color.decode(c.hex) }.getOrDefault(java.awt.Color.ORANGE)
+                        val composeColor = Color(awtColor.red / 255f, awtColor.green / 255f, awtColor.blue / 255f)
+                        Box(
+                            modifier = Modifier
+                                .size(26.dp)
+                                .background(composeColor, CircleShape)
+                                .border(
+                                    width = if (settings.color == c) 2.5.dp else 1.dp,
+                                    color = if (settings.color == c) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.outline,
+                                    shape = CircleShape,
+                                )
+                                .clickable { onColor(c) },
+                        )
+                    }
+                }
+            }
+            // Font chips
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Font", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(64.dp))
+                Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    DateImprintFont.entries.forEach { f ->
+                        FilterChip(selected = settings.font == f, onClick = { onFont(f) }, label = { Text(f.label) })
+                    }
+                }
+            }
+            AdjustmentSlider("Size", settings.sizePercent, 1f..4f, onSize, step = 0.1f, defaultValue = 2.0f)
+            // Position chips
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Pos", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(64.dp))
+                Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    DateImprintPosition.entries.forEach { p ->
+                        FilterChip(selected = settings.position == p, onClick = { onPosition(p) }, label = { Text(p.label) })
+                    }
+                }
+            }
+            // Sliders
+            AdjustmentSlider("Opacity",  settings.opacity.toFloat(),    0f..100f, { onOpacity(it.toInt()) },    step = 1f)
+            AdjustmentSlider("Glow",     settings.glowAmount.toFloat(), 0f..100f, { onGlow(it.toInt()) },       step = 1f)
+            AdjustmentSlider("Blur",     settings.blurAmount.toFloat(), 0f..100f, { onBlur(it.toInt()) },       step = 1f)
+            AdjustmentSlider("Repeat",   settings.blurRepeat.toFloat(), 1f..20f,  { onBlurRepeat(it.toInt()) }, step = 1f)
         }
     }
 }
