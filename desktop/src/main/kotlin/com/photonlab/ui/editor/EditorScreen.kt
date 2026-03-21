@@ -987,6 +987,7 @@ private fun FramePanel(state: EditState, onEnabled: (Boolean) -> Unit, onColor: 
 // ── Date Imprint panel ────────────────────────────────────────────────────────
 
 @Composable
+@OptIn(ExperimentalMaterial3Api::class)
 private fun DateImprintPanel(
     settings: DateImprintSettings,
     photoDate: java.util.Date?,
@@ -1014,15 +1015,37 @@ private fun DateImprintPanel(
             Switch(checked = settings.enabled, onCheckedChange = onEnabled)
         }
         if (settings.enabled) {
-            // Style selector — chips show example output (e.g. "24.12.95")
-            Text("Style", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
-            Row(modifier = Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(4.dp)) {
-                DateImprintStyle.entries.forEach { style ->
-                    FilterChip(
-                        selected = settings.style == style,
-                        onClick  = { onStyle(style) },
-                        label    = { Text(style.label, style = MaterialTheme.typography.labelSmall) },
+            // Style selector — dropdown showing example output for each style
+            var styleMenuExpanded by remember { mutableStateOf(false) }
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Style", style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.width(64.dp))
+                ExposedDropdownMenuBox(
+                    expanded = styleMenuExpanded,
+                    onExpandedChange = { styleMenuExpanded = it },
+                    modifier = Modifier.weight(1f),
+                ) {
+                    OutlinedTextField(
+                        value = settings.style.label,
+                        onValueChange = {},
+                        readOnly = true,
+                        singleLine = true,
+                        trailingIcon = { ExposedDropdownMenuDefaults.TrailingIcon(expanded = styleMenuExpanded) },
+                        colors = ExposedDropdownMenuDefaults.outlinedTextFieldColors(),
+                        textStyle = MaterialTheme.typography.bodySmall,
+                        modifier = Modifier.menuAnchor(MenuAnchorType.PrimaryNotEditable).fillMaxWidth(),
                     )
+                    ExposedDropdownMenu(
+                        expanded = styleMenuExpanded,
+                        onDismissRequest = { styleMenuExpanded = false },
+                    ) {
+                        DateImprintStyle.entries.forEach { style ->
+                            DropdownMenuItem(
+                                text = { Text(style.label, style = MaterialTheme.typography.bodySmall) },
+                                onClick = { onStyle(style); styleMenuExpanded = false },
+                                contentPadding = ExposedDropdownMenuDefaults.ItemContentPadding,
+                            )
+                        }
+                    }
                 }
             }
             // Color chips
