@@ -25,7 +25,7 @@ compose.desktop {
             })
             targetFormats(TargetFormat.Deb, TargetFormat.AppImage, TargetFormat.Exe)
             packageName = "photonlab"
-            packageVersion = "2.0.0"
+            packageVersion = "2.0.1"
             description = "PhotonLab - Non-destructive photo editor"
             vendor = "PhotonLab"
 
