@@ -58,6 +58,17 @@ Image.open('$PROJ/desktop/src/main/resources/photonlab_icon.png') \
 </component>
 APPSTREAM_EOF
 
+    # Patch Depends: replace t64-suffixed lib names with cross-version alternatives
+    # jpackage on Ubuntu 24.04 generates libasound2t64 / libpng16-16t64 which don't
+    # exist on older Ubuntu/Debian. Use OR dependencies so the package installs on both.
+    CONTROL="$PATCH_DIR/DEBIAN/control"
+    if [ -f "$CONTROL" ]; then
+        sed -i \
+            -e 's/libasound2t64/libasound2t64 | libasound2/g' \
+            -e 's/libpng16-16t64/libpng16-16t64 | libpng16-16/g' \
+            "$CONTROL"
+    fi
+
     dpkg-deb --build --root-owner-group "$PATCH_DIR" "$DEB_FILE"
     rm -rf "$PATCH_DIR"
 fi
