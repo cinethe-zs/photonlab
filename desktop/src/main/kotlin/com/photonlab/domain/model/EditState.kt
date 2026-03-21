@@ -1,11 +1,11 @@
 package com.photonlab.domain.model
 
-import android.net.Uri
-
 /**
  * Immutable snapshot of all current edit parameters.
  * All slider values are in their "raw" UI range; the rendering pipeline
  * normalises them before passing to the shader.
+ *
+ * Desktop version — no Android dependencies. [lutPath] replaces Android's Uri.
  */
 data class EditState(
     // Tone
@@ -19,8 +19,8 @@ data class EditState(
     val vibrance: Float = 0f,     // -100 .. +100
     val temperature: Float = 0f,  // -100 .. +100 (cool → warm)
     val tint: Float = 0f,         // -100 .. +100 (green → magenta)
-    // LUT
-    val lutUri: Uri? = null,
+    // LUT — stored as canonical path string (empty = no LUT)
+    val lutPath: String = "",
     // Transform
     val rotation: Int = 0,           // 0, 90, 180, 270 degrees (90° steps)
     val fineRotation: Float = 0f,    // -45 .. +45 degrees (free rotation, 0.1° steps)
@@ -40,24 +40,7 @@ data class EditState(
         get() = exposure == 0f && luminosity == 0f && contrast == 0f &&
                 highlights == 0f && shadows == 0f && saturation == 0f &&
                 vibrance == 0f && temperature == 0f && tint == 0f &&
-                lutUri == null && rotation == 0 && fineRotation == 0f &&
+                lutPath.isEmpty() && rotation == 0 && fineRotation == 0f &&
                 cropRect == null && !frameEnabled && sharpening == 0f && noise == 0f &&
                 !dateImprint.enabled
-}
-
-/**
- * Crop rectangle in normalised image coordinates (0.0 .. 1.0).
- */
-data class NormalizedRect(
-    val left: Float,
-    val top: Float,
-    val right: Float,
-    val bottom: Float,
-) {
-    val width get() = right - left
-    val height get() = bottom - top
-
-    companion object {
-        val FULL = NormalizedRect(0f, 0f, 1f, 1f)
-    }
 }

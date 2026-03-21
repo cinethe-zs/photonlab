@@ -1,6 +1,15 @@
 # PhotonLab
 
-A fast, non-destructive Android photo editor with a Neon Night aesthetic. Built entirely with Jetpack Compose and AGSL shaders — no native libraries, no cloud dependencies.
+A fast, non-destructive photo editor with a Neon Night aesthetic. Available on **Android** and **Linux / Windows desktop**. Built entirely with Kotlin and Jetpack Compose — no native libraries, no cloud dependencies.
+
+---
+
+## Platforms
+
+| Platform | UI toolkit | Rendering |
+|---|---|---|
+| Android | Jetpack Compose + Material 3 | AGSL RuntimeShader (API 33+); RenderScript Compat fallback |
+| Linux / Windows | Compose Multiplatform (Desktop) | LWJGL/GLSL offscreen OpenGL; CPU fallback |
 
 ---
 
@@ -26,8 +35,8 @@ A fast, non-destructive Android photo editor with a Neon Night aesthetic. Built 
 | Noise / Grain | −100 (denoise) to +100 (grain) |
 
 ### LUT
-- Import `.cube` (3D LUT) or HaldCLUT PNG files from device storage
-- LUTs applied via AGSL tetrahedral interpolation (hardware-accelerated)
+- Import `.cube` (3D LUT) or HaldCLUT PNG files
+- Applied via tetrahedral interpolation (GPU-accelerated)
 - One LUT at a time; easily removed
 
 ### Transform
@@ -40,16 +49,23 @@ A fast, non-destructive Android photo editor with a Neon Night aesthetic. Built 
 - Configurable width (0–30% of shorter side)
 - Optional aspect ratio target (e.g. 1:1, 4:5, 16:9)
 
+### Date Imprint
+- Overlay a date stamp in classic film-camera style
+- 18 format presets (Classic, ISO 8601, EU/US numeric, date+time, time-only…) via dropdown
+- 6 colors, 5 fonts, 5 positions
+- Size as a percentage of the longest image dimension (no upper cap)
+- Configurable opacity, glow, and blur
+
 ### Batch Workflow
 - Open multiple images at once
-- Swipe left/right to navigate — per-image edits are preserved in memory
-- Export queued in the background; jump to the next image immediately
-- Save a preset and optionally auto-apply it to every subsequent image in the batch
+- Navigate per-image with swipe or arrows — edits preserved in memory
+- **Export current** or **Export all** — processing queued in the background
+- On close with pending exports: choose **Continue in background** (window hides, process exits when done), **Wait**, or **Close anyway**
+- Save a preset and optionally auto-apply it to every image in the batch
 
 ### Histogram
-- Toggleable RGB histogram overlay on the image
-- Logarithmic scale for detail in dark/bright regions
-- Uses a frame-free render so border pixels never contaminate the data
+- Toggleable RGB histogram overlay
+- Logarithmic scale for shadow/highlight detail
 
 ### Presets
 - Save any set of adjustments as a named preset
@@ -65,41 +81,77 @@ A fast, non-destructive Android photo editor with a Neon Night aesthetic. Built 
 
 ---
 
+## Desktop-specific features (Linux / Windows)
+
+- **Two layout modes** (Settings): bottom panel (default) or side panel
+- Resizable editor panel — drag the divider between image and controls
+- Zoom in/out with scroll wheel or +/− keys; pan by dragging
+- Adaptive preview resolution: `1920px × zoom factor`, updated after 250 ms debounce
+- Drag-and-drop images onto the window
+- Always dark theme
+- Keyboard shortcuts: +/− to zoom
+
+---
+
 ## Tech Stack
 
-| Area | Choice |
-|---|---|
-| Language | Kotlin |
-| UI | Jetpack Compose + Material 3 |
-| Rendering | AGSL RuntimeShader (API 33+) |
-| Architecture | MVVM — ViewModel + StateFlow |
-| DI | Hilt |
-| Image loading | Coil 3 |
-| Build | Gradle Kotlin DSL |
+| Area | Android | Desktop |
+|---|---|---|
+| Language | Kotlin | Kotlin |
+| UI | Jetpack Compose + Material 3 | Compose Multiplatform + Material 3 |
+| Rendering | AGSL RuntimeShader | LWJGL/GLSL + CPU fallback |
+| Architecture | MVVM — ViewModel + StateFlow | MVVM — ViewModel + StateFlow |
+| DI | Hilt | — |
+| Image loading | Coil 3 | Java ImageIO |
+| Build | Gradle Kotlin DSL | Gradle Kotlin DSL + jpackage |
 
 ---
 
 ## Requirements
 
+### Android
 - Android 8.0+ (API 26)
-- AGSL hardware acceleration used automatically on API 33+ devices
+- AGSL hardware acceleration on API 33+
 - Permissions: `READ_MEDIA_IMAGES` (API 33+) or `READ_EXTERNAL_STORAGE` (API ≤ 32)
-- No internet permission required
+
+### Linux
+- x86-64, any modern distribution
+- Install the `.deb` package (tested on Ubuntu/Debian/GNOME)
+- Java runtime bundled — no separate JDK needed
+
+### Windows
+- x86-64, Windows 10+
+- Install the `.exe` / `.msi` package
+- Java runtime bundled
 
 ---
 
 ## Build
 
-```bash
-# Debug APK → app/build/outputs/apk/debug/photonlab-v1.0-debug.apk
-set JAVA_HOME=C:\Program Files\Android\Android Studio\jbr
-gradlew.bat assembleDebug
+### Android
 
-# Release APK (requires signing config in build.gradle.kts)
-gradlew.bat assembleRelease
+```bash
+# Debug APK
+./gradlew assembleDebug
+
+# Release APK (requires signing config)
+./gradlew assembleRelease
 ```
 
-Output is saved to `Pictures/PhotonLab/` on the device via MediaStore.
+### Linux .deb
+
+Requires [Zulu JDK 21](https://www.azul.com/downloads/) at `~/jdk/zulu21.42.19-ca-jdk21.0.7-linux_x64`.
+
+```bash
+bash build_deb.sh
+# Output: dist/main/deb/photonlab_2.0.0_amd64.deb
+```
+
+### Windows .exe / .msi
+
+```powershell
+gradlew.bat :desktop:packageExe   # or packageMsi
+```
 
 ---
 
@@ -107,24 +159,20 @@ Output is saved to `Pictures/PhotonLab/` on the device via MediaStore.
 
 ```
 photonlab/
-├── app/src/main/
-│   ├── java/com/photonlab/
-│   │   ├── ui/
-│   │   │   ├── editor/          # EditorScreen, EditorViewModel, CropScreen
-│   │   │   ├── components/      # AdjustmentSlider, ToolPanel
-│   │   │   └── theme/           # Neon Night Material 3 theme
-│   │   ├── domain/
-│   │   │   ├── model/           # EditState, LutFile, NormalizedRect
-│   │   │   └── EditHistoryManager
-│   │   ├── data/
-│   │   │   ├── lut/             # LutParser (.cube + HaldCLUT)
-│   │   │   └── repository/      # LutRepository
-│   │   └── rendering/
-│   │       └── EditPipeline     # AGSL shader chain
-│   └── res/
-│       ├── drawable/            # Adaptive icon (Neon Night)
-│       ├── raw/                 # AGSL shader sources
-│       └── values/              # Strings, theme
+├── app/                          # Android module
+│   └── src/main/java/com/photonlab/
+│       ├── ui/editor/            # EditorScreen, EditorViewModel, CropScreen
+│       ├── domain/model/         # EditState, LutFile, NormalizedRect
+│       ├── data/lut/             # LUT parser (.cube + HaldCLUT)
+│       └── rendering/            # AGSL EditPipeline
+├── desktop/                      # Compose Desktop module (Linux + Windows)
+│   └── src/main/kotlin/com/photonlab/
+│       ├── Main.kt               # Application entry point
+│       ├── ui/editor/            # EditorScreen, EditorViewModel, CropScreen
+│       ├── domain/               # Shared model (EditState, DateImprintSettings…)
+│       ├── rendering/            # EditPipeline, GlslToneRenderer, DateImprintProcessor
+│       └── platform/             # DesktopBitmap, DesktopSaveManager, DesktopFilePicker
+├── build_deb.sh                  # Linux .deb build + post-processing script
 └── README.md
 ```
 
@@ -133,19 +181,20 @@ photonlab/
 ## Rendering Pipeline
 
 ```
-Source Bitmap (full resolution)
+Source Bitmap (full resolution, no downsampling)
     │
     ├─► Quick preview (512px) — rendered immediately on every change
     │
-    └─► Full preview (1280px) — rendered after 250ms debounce
+    └─► Adaptive preview (1920px × zoom) — rendered after 250ms debounce
             │
-            └─► EditPipeline (AGSL RuntimeShader chain)
+            └─► EditPipeline
                     ├── Geometry: rotation + fine rotation + crop
                     ├── Tone:     exposure → luminosity → contrast → highlights → shadows
                     ├── Color:    saturation → vibrance → temperature → tint
                     ├── Detail:   sharpening → noise/grain
                     ├── LUT:      3D tetrahedral interpolation
-                    └── Frame:    border compositing
+                    ├── Frame:    border compositing
+                    └── Date:     imprint overlay (text, glow, blur)
 ```
 
 Export runs the pipeline at full source resolution on `Dispatchers.IO`.

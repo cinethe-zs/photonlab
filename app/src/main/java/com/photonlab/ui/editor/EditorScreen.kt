@@ -49,6 +49,8 @@ import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.BarChart
 import androidx.compose.material.icons.filled.GridOn
 import androidx.compose.material.icons.filled.Save
+import androidx.compose.material.icons.filled.SaveAlt
+import java.util.Date
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.SkipNext
 import androidx.compose.material3.AlertDialog
@@ -110,6 +112,9 @@ import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import androidx.hilt.navigation.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.photonlab.domain.model.DateImprintColor
+import com.photonlab.domain.model.DateImprintFont
+import com.photonlab.domain.model.DateImprintPosition
 import com.photonlab.domain.model.EditState
 import com.photonlab.domain.model.LutFile
 import com.photonlab.ui.components.AdjustmentSlider
@@ -389,6 +394,7 @@ fun EditorScreen(
                         onRedo       = viewModel::redo,
                         onReset      = viewModel::resetAll,
                         onExport     = viewModel::export,
+                        onExportAll  = viewModel::exportAll,
                         onSettings   = viewModel::openSettings,
                         onSkip       = viewModel::skipImage,
                         onHistory    = viewModel::openHistory,
@@ -499,6 +505,7 @@ private fun TopBar(
     onRedo: () -> Unit,
     onReset: () -> Unit,
     onExport: () -> Unit,
+    onExportAll: () -> Unit,
     onSettings: () -> Unit,
     onSkip: () -> Unit,
     onHistory: () -> Unit,
@@ -532,6 +539,11 @@ private fun TopBar(
         }
         IconButton(onClick = onReset, enabled = hasImage) {
             Icon(Icons.Default.DeleteSweep, contentDescription = "Reset all")
+        }
+        if (batchCount > 1) {
+            FilledTonalIconButton(onClick = onExportAll, enabled = hasImage && !isProcessing) {
+                Icon(Icons.Default.SaveAlt, contentDescription = "Save all")
+            }
         }
         FilledTonalIconButton(onClick = onExport, enabled = hasImage && !isProcessing) {
             Icon(Icons.Default.Save, contentDescription = "Export")
@@ -622,6 +634,8 @@ private fun historyLabel(index: Int, state: EditState, prev: EditState?): String
         if (state.frameEnabled != prev.frameEnabled || state.frameSizePct != prev.frameSizePct
                 || state.frameColor != prev.frameColor || state.frameRatio != prev.frameRatio)
             add(if (state.frameEnabled) "Frame" else "Frame off")
+        if (state.dateImprint != prev.dateImprint)
+            add(if (state.dateImprint.enabled) "Date imprint" else "Date imprint off")
         if (state.lutUri      != prev.lutUri)      add(if (state.lutUri != null) "LUT" else "LUT removed")
     }
     return if (parts.isEmpty()) "No changes" else parts.joinToString(", ")
@@ -969,6 +983,7 @@ private fun PresetParam.displayValue(state: EditState, currentLutName: String?):
     PresetParam.ROTATION    -> "${"%.1f".format(state.rotation.toFloat() + state.fineRotation)}°"
     PresetParam.LUT         -> currentLutName ?: "applied"
     PresetParam.FRAME       -> "${state.frameSizePct.toInt()}%"
+    PresetParam.DATE_IMPRINT -> if (state.dateImprint.enabled) state.dateImprint.style.label else "Off"
 }
 
 private fun PresetParam.isNonDefault(state: EditState, hasLut: Boolean): Boolean = when (this) {
@@ -986,6 +1001,7 @@ private fun PresetParam.isNonDefault(state: EditState, hasLut: Boolean): Boolean
     PresetParam.ROTATION    -> state.rotation    != 0 || state.fineRotation != 0f
     PresetParam.LUT         -> hasLut
     PresetParam.FRAME       -> state.frameEnabled
+    PresetParam.DATE_IMPRINT -> state.dateImprint.enabled
 }
 
 // ── Tool controls ──────────────────────────────────────────────────────────────
@@ -1051,6 +1067,21 @@ private fun ToolControls(
                         onColor    = viewModel::setFrameColor,
                         onRatio    = viewModel::setFrameRatio,
                         onSize     = viewModel::setFrameSizePct,
+                    )
+                    SectionHeader("Date Imprint")
+                    DateImprintPanel(
+                        state           = e,
+                        photoDate       = state.photoDate,
+                        onEnabled       = viewModel::setDateImprintEnabled,
+                        onCycleStyle    = viewModel::cycleDataImprintStyle,
+                        onColor         = viewModel::setDateImprintColor,
+                        onFont          = viewModel::setDateImprintFont,
+                        onPosition      = viewModel::setDateImprintPosition,
+                        onSize          = viewModel::setDateImprintSize,
+                        onGlow          = viewModel::setDateImprintGlow,
+                        onBlur          = viewModel::setDateImprintBlur,
+                        onOpacity       = viewModel::setDateImprintOpacity,
+                        onRepeat        = viewModel::setDateImprintRepeat,
                     )
                 }
             }
@@ -1239,6 +1270,118 @@ private fun FramePanel(
             AdjustmentSlider("Size", state.frameSizePct, 0f..30f, onSize, step = 0.5f)
         }
     }
+}
+
+// ── Date imprint panel ────────────────────────────────────────────────────────
+
+@Composable
+private fun DateImprintPanel(
+    state: EditState,
+    photoDate: Date?,
+    onEnabled: (Boolean) -> Unit,
+    onCycleStyle: () -> Unit,
+    onColor: (DateImprintColor) -> Unit,
+    onFont: (DateImprintFont) -> Unit,
+    onPosition: (DateImprintPosition) -> Unit,
+    onSize: (Float) -> Unit,
+    onGlow: (Float) -> Unit,
+    onBlur: (Float) -> Unit,
+    onOpacity: (Float) -> Unit,
+    onRepeat: (Float) -> Unit,
+) {
+    val di = state.dateImprint
+    Column(
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp),
+    ) {
+        Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(modifier = Modifier.weight(1f)) {
+                Text("Date imprint", style = MaterialTheme.typography.bodyMedium)
+                val dateLabel = when {
+                    photoDate != null -> di.style.format(photoDate)
+                    else              -> "No EXIF date — using today"
+                }
+                Text(dateLabel, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
+            }
+            Switch(checked = di.enabled, onCheckedChange = onEnabled)
+        }
+
+        if (di.enabled) {
+            // Style chip (cycles through all styles)
+            Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                Text("Style", style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    modifier = Modifier.weight(1f))
+                FilterChip(selected = true, onClick = onCycleStyle,
+                    label = { Text(di.style.label, maxLines = 1, overflow = TextOverflow.Ellipsis) })
+            }
+
+            // Color chips
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                DateImprintColor.entries.forEach { color ->
+                    val argb = parseHexToArgb(color.hex)
+                    val isSelected = di.color == color
+                    Box(
+                        modifier = Modifier
+                            .size(28.dp)
+                            .background(Color(argb), CircleShape)
+                            .border(
+                                width = if (isSelected) 2.5.dp else 1.dp,
+                                color = if (isSelected) MaterialTheme.colorScheme.primary
+                                        else MaterialTheme.colorScheme.outline,
+                                shape = CircleShape,
+                            )
+                            .clickable { onColor(color) },
+                    )
+                }
+            }
+
+            // Font chips
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                DateImprintFont.entries.forEach { font ->
+                    FilterChip(
+                        selected = di.font == font,
+                        onClick  = { onFont(font) },
+                        label    = { Text(font.label) },
+                        modifier = Modifier.padding(0.dp),
+                    )
+                }
+            }
+
+            // Position chips
+            Row(
+                modifier = Modifier.horizontalScroll(rememberScrollState()),
+                horizontalArrangement = Arrangement.spacedBy(4.dp),
+            ) {
+                DateImprintPosition.entries.forEach { pos ->
+                    FilterChip(
+                        selected = di.position == pos,
+                        onClick  = { onPosition(pos) },
+                        label    = { Text(pos.label) },
+                        modifier = Modifier.padding(0.dp),
+                    )
+                }
+            }
+
+            AdjustmentSlider("Size",    di.sizePercent,           1f..4f,    onSize,    step = 0.1f, defaultValue = 2.0f)
+            AdjustmentSlider("Opacity", di.opacity.toFloat(),     0f..100f,  onOpacity, defaultValue = 50f)
+            AdjustmentSlider("Glow",    di.glowAmount.toFloat(),  0f..100f,  onGlow,    defaultValue = 100f)
+            AdjustmentSlider("Blur",    di.blurAmount.toFloat(),  0f..100f,  onBlur,    defaultValue = 50f)
+            AdjustmentSlider("Repeat",  di.blurRepeat.toFloat(),  1f..20f,   onRepeat,  step = 1f, defaultValue = 3f)
+        }
+    }
+}
+
+private fun parseHexToArgb(hex: String): Long {
+    val h = hex.trimStart('#')
+    val r = h.substring(0, 2).toInt(16)
+    val g = h.substring(2, 4).toInt(16)
+    val b = h.substring(4, 6).toInt(16)
+    return 0xFF000000L or (r.toLong() shl 16) or (g.toLong() shl 8) or b.toLong()
 }
 
 // ── Empty state ───────────────────────────────────────────────────────────────

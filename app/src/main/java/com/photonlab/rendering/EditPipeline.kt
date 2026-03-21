@@ -42,8 +42,8 @@ class EditPipeline @Inject constructor(
      * Full pipeline: rotation → tone → LUT → sharpening → noise → crop → frame.
      * Equivalent to [processUpToFrame] + [applyFrame].
      */
-    fun process(source: Bitmap, state: EditState, lut: LutFile?): Bitmap {
-        val preFrame = processUpToFrame(source, state, lut)
+    fun process(source: Bitmap, state: EditState, lut: LutFile?, date: java.util.Date = java.util.Date()): Bitmap {
+        val preFrame = processUpToFrame(source, state, lut, date)
         return if (state.frameEnabled) applyFrame(preFrame, state) else preFrame
     }
 
@@ -54,8 +54,8 @@ class EditPipeline @Inject constructor(
      *
      * When [EditState.frameEnabled] is false both elements of the pair are the same object.
      */
-    fun processAll(source: Bitmap, state: EditState, lut: LutFile?): Pair<Bitmap, Bitmap> {
-        val preFrame = processUpToFrame(source, state, lut)
+    fun processAll(source: Bitmap, state: EditState, lut: LutFile?, date: java.util.Date = java.util.Date()): Pair<Bitmap, Bitmap> {
+        val preFrame = processUpToFrame(source, state, lut, date)
         return if (state.frameEnabled) Pair(applyFrame(preFrame, state), preFrame)
                else Pair(preFrame, preFrame)
     }
@@ -64,10 +64,13 @@ class EditPipeline @Inject constructor(
      * Runs all pipeline steps except the frame border. Useful when the caller needs
      * the unframed result (e.g. for histogram computation).
      */
-    fun processUpToFrame(source: Bitmap, state: EditState, lut: LutFile?): Bitmap {
+    fun processUpToFrame(source: Bitmap, state: EditState, lut: LutFile?, date: java.util.Date = java.util.Date()): Bitmap {
         val rotated     = applyRotation(source, state.rotation)
         val fineRotated = applyFineRotation(rotated, state.fineRotation)
-        val toneAdj     = applyTone(fineRotated, state)
+        val imprinted   = if (state.dateImprint.enabled)
+            DateImprintProcessor.burn(fineRotated, state.dateImprint, date, context)
+        else fineRotated
+        val toneAdj     = applyTone(imprinted, state)
         val lutApplied  = if (lut != null) applyLut(toneAdj, lut) else toneAdj
         val sharpened   = if (state.sharpening > 0f) applySharpening(lutApplied, state.sharpening) else lutApplied
         val noised      = if (state.noise != 0f) applyNoise(sharpened, state.noise) else sharpened
