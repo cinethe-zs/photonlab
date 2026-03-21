@@ -146,8 +146,6 @@ class EditorViewModel {
         }
         scope.launch(Dispatchers.IO) {
             for (job in exportChannel) {
-                val count = pendingExports.incrementAndGet()
-                _uiState.update { it.copy(pendingExportCount = count) }
                 runCatching {
                     val rawImage = ImageIO.read(job.file) ?: error("Could not read ${job.file.name}")
                     val bitmap = DesktopBitmap.fromBufferedImage(rawImage)
@@ -565,6 +563,7 @@ class EditorViewModel {
         val lut     = _uiState.value.currentLut
         val quality = _uiState.value.jpegQuality
         val date    = _uiState.value.photoDate
+        pendingExports.incrementAndGet().also { _uiState.update { s -> s.copy(pendingExportCount = it) } }
         exportChannel.trySend(ExportJob(file, state, lut, quality, date))
         if (batchIndex < batchFiles.size - 1) {
             saveSnapshot()
@@ -602,6 +601,7 @@ class EditorViewModel {
                     else -> Pair(EditState(), null)
                 }
                 val photoDate = readExifDate(file)
+                pendingExports.incrementAndGet().also { c -> _uiState.update { s -> s.copy(pendingExportCount = c) } }
                 exportChannel.trySend(ExportJob(file, state, lut, quality, photoDate))
             }
         }
