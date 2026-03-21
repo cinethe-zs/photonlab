@@ -188,13 +188,14 @@ Source Bitmap (full resolution, no downsampling)
     └─► Adaptive preview (1920px × zoom) — rendered after 250ms debounce
             │
             └─► EditPipeline
-                    ├── Geometry: rotation + fine rotation + crop
+                    ├── Geometry: rotation + fine rotation
+                    ├── Date:     imprint overlay (burned before grading — authentic film behavior)
                     ├── Tone:     exposure → luminosity → contrast → highlights → shadows
                     ├── Color:    saturation → vibrance → temperature → tint
                     ├── Detail:   sharpening → noise/grain
                     ├── LUT:      3D tetrahedral interpolation
-                    ├── Frame:    border compositing
-                    └── Date:     imprint overlay (text, glow, blur)
+                    ├── Crop:     non-destructive crop rect applied
+                    └── Frame:    border compositing
 ```
 
 Export runs the pipeline at full source resolution on `Dispatchers.IO`.
