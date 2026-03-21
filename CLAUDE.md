@@ -1,146 +1,184 @@
-# PhotonLab — Android Photo Editor
+# PhotonLab — Kotlin Multiplatform Photo Editor
 
 ## Project Overview
-PhotonLab is a simple, fast Android photo editor focused on delivering real-time, non-destructive edits with a clean, accessible UI.
+PhotonLab is a fast, non-destructive photo editor targeting Android and Linux/Windows desktop. Both platforms share the same domain model and edit pipeline logic; UI is platform-specific (Jetpack Compose on Android, Compose Multiplatform on desktop).
 
-## Tech Stack
-| Area | Choice | Notes |
-|---|---|---|
-| Language | Kotlin | Latest stable version |
-| Min SDK | API 26 (Android 8.0) | ~95% device coverage |
-| Target SDK | API 35 (Android 15) | Always keep up to date |
-| UI Toolkit | Jetpack Compose + Material 3 | Declarative UI, system light/dark theme |
-| Rendering | AGSL (Android Graphics Shading Language) | API 33+; fallback to RenderScript Compat for API 26-32 |
-| Architecture | MVVM + Clean Architecture | ViewModel, StateFlow, Repository pattern |
-| Build | Gradle Kotlin DSL (.kts) | Modern, type-safe build scripts |
-| Image Loading | Coil 3 | Compose-native, async loading |
-| DI | Hilt | Standard Android DI |
+---
 
 ## Module Structure
+
 ```
 photonlab/
-├── app/
-│   └── src/main/
-│       ├── java/com/photonlab/
-│       │   ├── ui/
-│       │   │   ├── editor/          # Editor screen (main screen)
-│       │   │   ├── components/      # Reusable Compose components
-│       │   │   └── theme/           # Material 3 theme, colors, typography
-│       │   ├── domain/
-│       │   │   ├── model/           # EditState, LutFile, ExportConfig
-│       │   │   └── usecase/         # ApplyEdits, ExportImage, ImportLut
-│       │   ├── data/
-│       │   │   ├── lut/             # LUT parser (3DLUT .cube, HaldCLUT PNG)
-│       │   │   └── repository/      # EditRepository, LutRepository
-│       │   └── rendering/
-│       │       ├── EditPipeline     # Orchestrates shader passes
-│       │       ├── shaders/         # AGSL shader sources
-│       │       └── LutRenderer      # Applies LUT via AGSL or RenderScript
-│       └── res/
-│           ├── raw/                 # Bundled AGSL shader files (.agsl)
-│           └── ...
+├── app/                    Android module (Jetpack Compose, AGSL)
+├── desktop/                Compose Desktop module (Linux + Windows, LWJGL/GLSL)
+├── build_deb.sh            Linux .deb builder + post-processing
 └── CLAUDE.md
 ```
 
-## Edit Functions
-All edits are stored as parameters in an `EditState` data class. The original image is never modified.
+---
 
-| Function | Type | Parameter range | Notes |
-|---|---|---|---|
-| LUT | AGSL shader | LUT file reference | 3DLUT (.cube) and HaldCLUT (PNG); imported from device storage |
-| Exposure | AGSL shader | -5.0 to +5.0 EV | Applied as multiplier on linear light |
-| Luminosity | AGSL shader | -100 to +100 | Brightness offset |
-| Contrast | AGSL shader | -100 to +100 | S-curve or linear scale |
-| Saturation | AGSL shader | -100 to +100 | HSL saturation channel |
-| Highlights | AGSL shader | -100 to +100 | Tone-range selective adjustment |
-| Shadows | AGSL shader | -100 to +100 | Tone-range selective adjustment |
-| Crop | Transform | Aspect ratio + rect | Non-destructive crop rect stored, applied on export |
-| Rotate | Transform | 0 / 90 / 180 / 270 | Plus free rotation if needed |
+## Tech Stack
 
-## Rendering Pipeline
+| Area | Android | Desktop |
+|---|---|---|
+| Language | Kotlin | Kotlin |
+| UI | Jetpack Compose + Material 3 | Compose Multiplatform + Material 3 |
+| Rendering | AGSL RuntimeShader (API 33+) / RenderScript Compat | LWJGL/GLSL offscreen OpenGL / CPU fallback |
+| Architecture | MVVM — ViewModel + StateFlow | MVVM — ViewModel + StateFlow |
+| DI | Hilt | — |
+| Build tool | Gradle Kotlin DSL | Gradle Kotlin DSL + jpackage |
+| Package format | APK / AAB | `.deb` (Linux), `.exe`/`.msi` (Windows) |
+
+---
+
+## Android Module (`app/`)
+
+### Source layout
+```
+app/src/main/java/com/photonlab/
+├── ui/
+│   ├── editor/          # EditorScreen, EditorViewModel, CropScreen
+│   ├── components/      # AdjustmentSlider, ToolPanel
+│   └── theme/           # Material 3 Neon Night theme
+├── domain/
+│   ├── model/           # EditState, LutFile, NormalizedRect
+│   └── EditHistoryManager
+├── data/
+│   ├── lut/             # LutParser (.cube + HaldCLUT)
+│   └── repository/      # LutRepository
+└── rendering/
+    └── EditPipeline     # AGSL RuntimeShader chain
+```
+
+### Rendering pipeline (Android)
 ```
 Source Bitmap
     └─► EditPipeline (AGSL RuntimeShader chain)
             ├── Pass 1: Exposure + Luminosity
             ├── Pass 2: Contrast + Highlights + Shadows
-            ├── Pass 3: Saturation
-            ├── Pass 4: LUT application (3D tetrahedral interpolation)
-            └─► Preview Surface (Canvas / AndroidView)
+            ├── Pass 3: Saturation + Vibrance + Temperature + Tint
+            ├── Pass 4: Sharpening + Noise/Grain
+            ├── Pass 5: LUT (3D tetrahedral interpolation)
+            └── Pass 6: Frame/border compositing
 ```
-- On devices API < 33: fall back to `RenderScript` compat library for shader-less operations; LUT applied via CPU lookup table.
-- Preview is rendered at screen resolution for performance; export renders at full original resolution.
+- API < 33: RenderScript Compat fallback for shader-less operations.
+- Preview at screen resolution; export at full source resolution.
 
-## Image Source
-- **Gallery / Files only** — uses `ActivityResultContracts.GetContent` with `image/*` MIME type.
-- Requires `READ_MEDIA_IMAGES` permission (API 33+) or `READ_EXTERNAL_STORAGE` (API 26–32).
-
-## LUT Import
-- User imports `.cube` files (3DLUT) or HaldCLUT PNG from device storage via file picker.
-- Parsed and cached in app-internal storage for fast reload.
-- No bundled LUTs; all LUTs are user-provided.
-
-## Edit History (Undo/Redo)
-- `EditHistoryManager` maintains a `List<EditState>` stack with a current index pointer.
-- `undo()` decrements index, `redo()` increments, `push()` truncates forward history.
-- Max stack depth: 50 states (configurable constant).
-
-## Export
-- Format: **JPEG only**, quality configurable (default 95).
-- Output saved to `Pictures/PhotonLab/` via `MediaStore` (no WRITE_EXTERNAL_STORAGE needed on API 29+).
-- Crop and rotation applied as final transform before encoding.
-
-## UI / UX Principles
-- **Single screen editor**: image preview takes the full screen; controls overlay at the bottom.
-- **Bottom sheet tool panel**: swipeable categories (Tone, Color, LUT, Transform).
-- **Slider controls**: each adjustment uses a horizontal slider with value label.
-- **Tap to compare**: tap and hold on preview shows original.
-- **Theme**: follows system light/dark (Material 3 Dynamic Color where supported).
-- **No modal dialogs** for adjustments — everything inline.
-
-## Key Dependencies (app/build.gradle.kts)
-```kotlin
-// Compose BOM
-implementation(platform("androidx.compose:compose-bom:2024.xx.xx"))
-implementation("androidx.compose.ui:ui")
-implementation("androidx.compose.material3:material3")
-implementation("androidx.activity:activity-compose:1.9.x")
-
-// Lifecycle / ViewModel
-implementation("androidx.lifecycle:lifecycle-viewmodel-compose:2.8.x")
-
-// Hilt
-implementation("com.google.dagger:hilt-android:2.51.x")
-kapt("com.google.dagger:hilt-compiler:2.51.x")
-
-// Coil
-implementation("io.coil-kt.coil3:coil-compose:3.x.x")
-
-// RenderScript compat (for API < 33 fallback)
-implementation("androidx.renderscript:renderscript-toolkit:0.1")
-```
-
-## Coding Conventions
-- All UI in Jetpack Compose; zero XML layouts.
-- `StateFlow` for all UI state; no `LiveData`.
-- Coroutines + `Dispatchers.Default` for image processing; never block the main thread.
-- Single `EditState` data class is the source of truth for all current adjustments.
-- Shaders stored as `.agsl` files in `res/raw/`, loaded at runtime via `RuntimeShader`.
-- All strings in `strings.xml`; no hardcoded UI strings.
-- Use `@Preview` composables for all UI components.
-
-## Permissions Required
+### Permissions
 ```xml
-<uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />  <!-- API 33+ -->
+<uses-permission android:name="android.permission.READ_MEDIA_IMAGES" />   <!-- API 33+ -->
 <uses-permission android:name="android.permission.READ_EXTERNAL_STORAGE"
     android:maxSdkVersion="32" />
 ```
-No internet permission needed.
 
-## Out of Scope (v1)
-- Batch processing
-- Cloud sync
-- Sharing to social networks
-- Video editing
-- Filters beyond LUT
-- Healing / clone stamp
-- Text overlays
+---
+
+## Desktop Module (`desktop/`)
+
+### Source layout
+```
+desktop/src/main/kotlin/com/photonlab/
+├── Main.kt                  # application{} entry point; WM_CLASS, drag-and-drop, icon
+├── ui/
+│   └── editor/
+│       ├── EditorScreen.kt  # Full UI — top bar, image area, tool panel, dialogs
+│       └── EditorViewModel.kt  # State + business logic
+├── domain/
+│   └── model/               # EditState, DateImprintSettings, LayoutMode, …
+├── rendering/
+│   ├── EditPipeline.kt      # Orchestrates GPU/CPU rendering passes
+│   ├── GlslToneRenderer.kt  # LWJGL offscreen OpenGL tone rendering
+│   └── DateImprintProcessor.kt  # Film-camera date stamp (AWT Graphics2D)
+└── platform/
+    ├── DesktopBitmap.kt     # Wraps java.awt.image.BufferedImage (TYPE_INT_ARGB)
+    ├── DesktopSaveManager.kt  # JPEG export via ImageIO
+    ├── DesktopFilePicker.kt  # JFileChooser-based file picker
+    └── DesktopPreferences.kt  # Persistent key-value store (java.util.prefs)
+```
+
+### Two-phase preview rendering
+```
+Source Bitmap (full resolution — no downsampling on load)
+    │
+    ├─► Quick preview (512px) — rendered immediately on every param change
+    │
+    └─► Adaptive full preview — rendered after 250ms debounce
+            Resolution = 1920px × currentZoom (zoom changes trigger re-render)
+```
+
+### Layout modes
+`LayoutMode` enum stored in `DesktopPreferences` (`layout_mode` key):
+- `BOTTOM` (default) — image fills screen, tool panel overlays at the bottom
+- `SIDE` — image left, editor panel right; divider draggable horizontally
+
+Panel sizes are resizable via drag handles (`detectVerticalDragGestures` / `detectHorizontalDragGestures`).
+
+### Export queue
+- `exportChannel: Channel<ExportJob>(UNLIMITED)` — single consumer coroutine on `Dispatchers.IO`
+- `pendingExports: AtomicInteger` — incremented at **send time** (not at consume time), so it accurately reflects all queued + in-progress jobs
+- On close with pending exports: dialog offers **Continue in background** / **Wait** / **Close anyway**
+- "Continue in background": sets `backgroundExporting = true` → `Window(visible = false)` in `Main.kt`; when counter reaches 0, `closeWindow = true` → `exitApplication()`
+
+### Linux packaging (`build_deb.sh`)
+1. Runs `./gradlew :desktop:packageDeb` (jpackage, Zulu JDK 21 required at `~/jdk/zulu21…`)
+2. Post-processes the `.deb` with `dpkg-deb -R / --build`:
+   - Adds `StartupWMClass=photonlab` to the `.desktop` file
+   - Adds `xdg-icon-resource install --novendor` to `postinst` / `postrm`
+   - Adds AppStream metadata (`.appdata.xml`) + cached 64×64 icon for GNOME Software
+3. Output: `dist/main/deb/photonlab_<version>_amd64.deb`
+
+### Linux icon / taskbar
+Three-layer fix to ensure correct icon everywhere:
+1. `System.setProperty("sun.awt.app.class", "photonlab")` before AWT init → X11 WM_CLASS
+2. `StartupWMClass=photonlab` in `.desktop` → GNOME taskbar matching
+3. `ProcessHandle`-based icon load from installed path (`/opt/photonlab/lib/photonlab.png`) with classpath fallback; also sets `java.awt.Taskbar.iconImage`
+
+### Build version
+Current: **2.0.0** — set in `desktop/build.gradle.kts` as `packageVersion = "2.0.0"`.
+
+---
+
+## Shared Domain Model
+
+`desktop/src/main/kotlin/com/photonlab/domain/model/`:
+
+| File | Contents |
+|---|---|
+| `EditState.kt` | All adjustment parameters (exposure, contrast, LUT ref, date imprint settings, …) |
+| `DateImprintSettings.kt` | `DateImprintStyle` (18 formats), `DateImprintColor`, `DateImprintFont`, `DateImprintPosition` |
+| `LutFile.kt` | LUT reference (path + parsed data) |
+| `GridMode.kt` | None / Rule-of-thirds / Golden ratio |
+
+---
+
+## Edit Functions
+
+| Function | Range | Notes |
+|---|---|---|
+| Exposure | −5 to +5 EV | Linear light multiplier |
+| Luminosity | −100 to +100 | Brightness offset |
+| Contrast | −100 to +100 | S-curve |
+| Highlights / Shadows | −100 to +100 | Tone-range selective |
+| Saturation | −100 to +100 | HSL channel |
+| Vibrance | −100 to +100 | Protects already-saturated colors |
+| Temperature | −100 to +100 | Cool → Warm |
+| Tint | −100 to +100 | Green → Magenta |
+| Sharpening | 0 to 100 | |
+| Noise / Grain | −100 to +100 | Negative = denoise |
+| LUT | file reference | 3DLUT `.cube` or HaldCLUT PNG |
+| Rotation | 0 / 90 / 180 / 270° + free −45°…+45° | |
+| Crop | rect + optional ratio | Non-destructive |
+| Frame | 0–30% width, custom color | Optional aspect ratio target |
+| Date imprint | 18 style formats | Size = % of longest side, min 6px, no upper cap |
+
+---
+
+## Coding Conventions
+
+- All UI in Jetpack Compose / Compose Multiplatform; zero XML layouts.
+- `StateFlow<UiState>` for all UI state; single source of truth.
+- Coroutines + `Dispatchers.Default` for image processing; `Dispatchers.IO` for file I/O.
+- Never block the main thread.
+- Intermediate `DesktopBitmap` objects must be `.recycle()`d after use to avoid heap pressure.
+- `DesktopBitmap.recycle()` calls `BufferedImage.flush()`.
+- Desktop theme is always dark (`DarkColorScheme`); Android follows system theme.
