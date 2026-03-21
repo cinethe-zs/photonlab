@@ -1,6 +1,6 @@
 @echo off
 REM Kill any running PhotonLab instances so they don't lock the exe
-taskkill /IM "photonlab-1.2.2.exe" /F >nul 2>&1
+taskkill /IM "photonlab-2.0.0.exe" /F >nul 2>&1
 
 REM Stop the Gradle daemon so it releases any directory handles
 set JAVA_HOME=C:\Program Files\Zulu\zulu-21
