@@ -60,6 +60,8 @@ data class Preset(
 
 // ── UI State ──────────────────────────────────────────────────────────────────
 
+enum class LayoutMode { BOTTOM, SIDE }
+
 data class EditorUiState(
     val sourceBitmap: DesktopBitmap? = null,
     val previewBitmap: DesktopBitmap? = null,
@@ -94,6 +96,7 @@ data class EditorUiState(
     val showExitConfirmDialog: Boolean = false,
     val closeWindow: Boolean = false,
     val photoDate: java.util.Date? = null,
+    val layoutMode: LayoutMode = LayoutMode.BOTTOM,
 )
 
 // ── Export job ─────────────────────────────────────────────────────────────────
@@ -123,6 +126,7 @@ class EditorViewModel {
     private var geomRenderJob: Job? = null
     private var quickSourceBitmap: DesktopBitmap? = null
     private var previewSourceBitmap: DesktopBitmap? = null
+    private var currentZoom: Float = 1f
 
     private var batchFiles: List<File> = emptyList()
     private var batchIndex: Int = 0
@@ -136,6 +140,7 @@ class EditorViewModel {
                 savedPresets = loadPresets(),
                 jpegQuality  = DesktopPreferences.getInt("jpeg_quality", 95),
                 lutFolder    = DesktopPreferences.getString("lut_folder", ""),
+                layoutMode   = LayoutMode.valueOf(DesktopPreferences.getString("layout_mode", LayoutMode.BOTTOM.name)),
             )
         }
         scope.launch(Dispatchers.IO) {
@@ -145,8 +150,11 @@ class EditorViewModel {
                 runCatching {
                     val processed = withContext(Dispatchers.Default) { pipeline.process(job.bitmap, job.state, job.lut, job.photoDate) }
                     val file = DesktopSaveManager.saveJpeg(processed, job.quality)
+                    processed.recycle()
+                    job.bitmap.recycle()
                     _uiState.update { it.copy(snackbarMessage = "Saved to ${file.path}") }
                 }.onFailure { err ->
+                    job.bitmap.recycle()
                     _uiState.update { it.copy(snackbarMessage = "Export failed: ${err.message}") }
                 }
                 val remaining = pendingExports.decrementAndGet()
@@ -211,7 +219,7 @@ class EditorViewModel {
             val photoDate = readExifDate(file)
 
             quickSourceBitmap   = downsample(bitmap, 512)
-            previewSourceBitmap = downsample(bitmap, 1280)
+            previewSourceBitmap = bitmap
             history.reset(initialState)
             _uiState.update {
                 it.copy(
@@ -452,6 +460,10 @@ class EditorViewModel {
         DesktopPreferences.putString("lut_folder", path)
         _uiState.update { it.copy(lutFolder = path) }
     }
+    fun setLayoutMode(mode: LayoutMode) {
+        DesktopPreferences.putString("layout_mode", mode.name)
+        _uiState.update { it.copy(layoutMode = mode) }
+    }
 
     // ── UI events ─────────────────────────────────────────────────────────
 
@@ -611,6 +623,11 @@ class EditorViewModel {
 
     // ── Render scheduling ─────────────────────────────────────────────────
 
+    fun onZoomChanged(zoom: Float) {
+        currentZoom = zoom
+        scheduleRender(_uiState.value.editState)
+    }
+
     private fun scheduleRender(state: EditState, immediate: Boolean = false) {
         renderJob?.cancel()
         renderJob = scope.launch {
@@ -622,7 +639,10 @@ class EditorViewModel {
                 _uiState.update { it.copy(previewBitmap = q, histogramBitmap = histo) }
             }
             if (!immediate) delay(250)
-            val src  = previewSourceBitmap ?: return@launch
+            val full = previewSourceBitmap ?: return@launch
+            // Adaptive resolution: 1920px at zoom 1×, scales up with zoom, capped at original
+            val targetMaxPx = (1920f * currentZoom).toInt()
+            val src = downsample(full, targetMaxPx)
             val lut  = _uiState.value.currentLut
             val date = _uiState.value.photoDate
             _uiState.update { it.copy(isProcessing = true) }

@@ -9,6 +9,8 @@ import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.gestures.awaitEachGesture
 import androidx.compose.foundation.gestures.awaitFirstDown
+import androidx.compose.foundation.gestures.detectVerticalDragGestures
+import androidx.compose.foundation.gestures.detectHorizontalDragGestures
 import androidx.compose.foundation.gestures.rememberTransformableState
 import androidx.compose.foundation.gestures.transformable
 import androidx.compose.foundation.gestures.waitForUpOrCancellation
@@ -26,6 +28,7 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Color
@@ -45,6 +48,7 @@ import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.IntSize
 import androidx.compose.ui.unit.dp
 import com.photonlab.domain.model.DateImprintColor
@@ -75,14 +79,23 @@ fun EditorScreen(
     var zoomOffset by remember { mutableStateOf(Offset.Zero) }
     var boxSize    by remember { mutableStateOf(IntSize.Zero) }
 
-    var topBarHeightPx      by remember { mutableIntStateOf(0) }
-    var bottomPanelHeightPx by remember { mutableIntStateOf(0) }
+    var topBarHeightPx by remember { mutableIntStateOf(0) }
+    var panelHeightDp  by remember { mutableStateOf(340.dp) }
+    val minPanelHeightDp = 48.dp
+    val maxPanelHeightDp = 600.dp
+    val dragHandleHeightDp = 8.dp
     val density = LocalDensity.current
+    val bottomPanelHeightPx = with(density) { (panelHeightDp + dragHandleHeightDp).roundToPx() }
+
+    var sidePanelWidthDp    by remember { mutableStateOf(320.dp) }
+    val minSidePanelWidthDp = 240.dp
+    val maxSidePanelWidthDp = 520.dp
 
     val focusRequester = remember { FocusRequester() }
     LaunchedEffect(boxSize) {
         if (boxSize != IntSize.Zero) runCatching { focusRequester.requestFocus() }
     }
+    LaunchedEffect(uiState.layoutMode) { zoom = 1f; zoomOffset = Offset.Zero }
 
     fun zoomBy(factor: Float, anchor: Offset? = null) {
         val newZoom = (zoom * factor).coerceIn(1f, 8f)
@@ -100,6 +113,7 @@ fun EditorScreen(
     }
 
     LaunchedEffect(uiState.sourceBitmap) { zoom = 1f; zoomOffset = Offset.Zero }
+    LaunchedEffect(zoom) { viewModel.onZoomChanged(zoom) }
 
     val transformableState = rememberTransformableState { zoomChange, panChange, _ ->
         zoom = (zoom * zoomChange).coerceIn(1f, 8f)
@@ -144,38 +158,12 @@ fun EditorScreen(
                 } else false
             }) {
 
-            // ── Full-screen image area ─────────────────────────────────────
-            Box(
-                modifier = Modifier
-                    .fillMaxSize()
-                    .background(MaterialTheme.colorScheme.surface)
-                    .padding(
-                        top    = with(density) { topBarHeightPx.toDp() },
-                        bottom = with(density) { bottomPanelHeightPx.toDp() },
-                    )
-                    .onSizeChanged { boxSize = it }
-                    .pointerInput(Unit) {
-                        awaitPointerEventScope {
-                            while (true) {
-                                val event = awaitPointerEvent()
-                                if (event.type == PointerEventType.Scroll) {
-                                    val scrollY = event.changes.fold(0f) { acc, c -> acc + c.scrollDelta.y }
-                                    if (scrollY != 0f) {
-                                        val factor = if (scrollY < 0) 1.1f else 1f / 1.1f
-                                        zoomBy(factor, event.changes.firstOrNull()?.position)
-                                        event.changes.forEach { it.consume() }
-                                    }
-                                }
-                            }
-                        }
-                    },
-                contentAlignment = Alignment.Center,
-            ) {
+            // ── Shared image content lambda ────────────────────────────────
+            val imageContent: @Composable BoxScope.() -> Unit = {
                 val displayBitmap = when {
                     uiState.showOriginal -> uiState.originalGeomBitmap ?: uiState.sourceBitmap
                     else                 -> uiState.previewBitmap
                 }
-
                 if (displayBitmap != null) {
                     AnimatedContent(
                         targetState = uiState.batchNavKey to uiState.batchIndex,
@@ -252,7 +240,19 @@ fun EditorScreen(
                         )
                     }
                     if (uiState.gridMode != GridMode.NONE) {
-                        GridOverlay(gridMode = uiState.gridMode, modifier = Modifier.fillMaxSize())
+                        val imgW = displayBitmap.width.toFloat()
+                        val imgH = displayBitmap.height.toFloat()
+                        val boxW = boxSize.width.toFloat()
+                        val boxH = boxSize.height.toFloat()
+                        if (imgW > 0 && imgH > 0 && boxW > 0 && boxH > 0) {
+                            val scale = minOf(boxW / imgW, boxH / imgH)
+                            GridOverlay(
+                                gridMode = uiState.gridMode,
+                                modifier = Modifier
+                                    .size(with(density) { (imgW * scale).toDp() }, with(density) { (imgH * scale).toDp() })
+                                    .graphicsLayer(scaleX = zoom, scaleY = zoom, translationX = zoomOffset.x, translationY = zoomOffset.y),
+                            )
+                        }
                     }
                     Row(
                         modifier          = Modifier.align(Alignment.TopEnd).padding(4.dp),
@@ -289,53 +289,190 @@ fun EditorScreen(
                 }
             }
 
-            // ── Top bar overlay ────────────────────────────────────────────
-            Box(
-                modifier = Modifier
-                    .align(Alignment.TopCenter)
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surface)
-                    .onSizeChanged { topBarHeightPx = it.height },
-            ) {
-                Column {
-                    TopBar(
-                        canUndo      = uiState.canUndo,
-                        canRedo      = uiState.canRedo,
-                        hasImage     = uiState.sourceBitmap != null,
-                        canHistory   = uiState.historyEntries.size > 1,
-                        isProcessing = uiState.isProcessing,
-                        batchCount   = uiState.batchCount,
-                        batchIndex   = uiState.batchIndex,
-                        onOpen       = { scope.launch { val files = DesktopFilePicker.pickImageFiles(); if (files.isNotEmpty()) viewModel.loadImages(files) } },
-                        onUndo       = viewModel::undo,
-                        onRedo       = viewModel::redo,
-                        onReset      = viewModel::resetAll,
-                        onExport     = viewModel::export,
-                        onExportAll  = viewModel::exportAll,
-                        onSettings   = viewModel::openSettings,
-                        onSkip       = viewModel::skipImage,
-                        onHistory    = viewModel::openHistory,
-                    )
-                    HorizontalDivider()
+            // Shared scroll-zoom modifier for the image area Box
+            fun Modifier.imageAreaScrollZoom() = pointerInput(Unit) {
+                awaitPointerEventScope {
+                    while (true) {
+                        val event = awaitPointerEvent()
+                        if (event.type == PointerEventType.Scroll) {
+                            val scrollY = event.changes.fold(0f) { acc, c -> acc + c.scrollDelta.y }
+                            if (scrollY != 0f) {
+                                val factor = if (scrollY < 0) 1.1f else 1f / 1.1f
+                                zoomBy(factor, event.changes.firstOrNull()?.position)
+                                event.changes.forEach { it.consume() }
+                            }
+                        }
+                    }
                 }
             }
 
-            // ── Bottom edit panel overlay ──────────────────────────────────
-            Box(
-                modifier = Modifier
-                    .align(Alignment.BottomCenter)
-                    .fillMaxWidth()
-                    .background(MaterialTheme.colorScheme.surface)
-                    .onSizeChanged { bottomPanelHeightPx = it.height },
-            ) {
-                Column {
-                    HorizontalDivider()
-                    ToolControls(
-                        state       = uiState,
-                        viewModel   = viewModel,
-                        onLutPick   = { scope.launch { DesktopFilePicker.pickLutFile(uiState.lutFolder)?.let { viewModel.importLut(it) } } },
-                        onStartCrop = viewModel::startCrop,
-                    )
+            if (uiState.layoutMode == LayoutMode.SIDE) {
+                // ── Side layout: top bar + (image | panel) ────────────────
+                Column(modifier = Modifier.fillMaxSize()) {
+                    Box(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surface)
+                            .onSizeChanged { topBarHeightPx = it.height },
+                    ) {
+                        Column {
+                            TopBar(
+                                canUndo      = uiState.canUndo,
+                                canRedo      = uiState.canRedo,
+                                hasImage     = uiState.sourceBitmap != null,
+                                canHistory   = uiState.historyEntries.size > 1,
+                                isProcessing = uiState.isProcessing,
+                                batchCount   = uiState.batchCount,
+                                batchIndex   = uiState.batchIndex,
+                                onOpen       = { scope.launch { val files = DesktopFilePicker.pickImageFiles(); if (files.isNotEmpty()) viewModel.loadImages(files) } },
+                                onUndo       = viewModel::undo,
+                                onRedo       = viewModel::redo,
+                                onReset      = viewModel::resetAll,
+                                onExport     = viewModel::export,
+                                onExportAll  = viewModel::exportAll,
+                                onSettings   = viewModel::openSettings,
+                                onSkip       = viewModel::skipImage,
+                                onHistory    = viewModel::openHistory,
+                            )
+                            HorizontalDivider()
+                        }
+                    }
+                    Row(modifier = Modifier.fillMaxWidth().weight(1f)) {
+                        // Image area
+                        Box(
+                            modifier = Modifier
+                                .weight(1f)
+                                .fillMaxHeight()
+                                .clipToBounds()
+                                .background(MaterialTheme.colorScheme.surface)
+                                .onSizeChanged { boxSize = it }
+                                .imageAreaScrollZoom(),
+                            contentAlignment = Alignment.Center,
+                        ) { imageContent() }
+                        // Vertical drag handle
+                        Box(
+                            modifier = Modifier
+                                .width(dragHandleHeightDp)
+                                .fillMaxHeight()
+                                .pointerInput(Unit) {
+                                    detectHorizontalDragGestures { _, dragAmountPx ->
+                                        val delta = with(density) { dragAmountPx.toDp() }
+                                        sidePanelWidthDp = (sidePanelWidthDp - delta)
+                                            .coerceIn(minSidePanelWidthDp, maxSidePanelWidthDp)
+                                    }
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .width(3.dp)
+                                    .height(32.dp)
+                                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f), CircleShape),
+                            )
+                        }
+                        VerticalDivider()
+                        // Editor panel
+                        Box(
+                            modifier = Modifier
+                                .width(sidePanelWidthDp)
+                                .fillMaxHeight()
+                                .background(MaterialTheme.colorScheme.surface),
+                        ) {
+                            ToolControls(
+                                state       = uiState,
+                                viewModel   = viewModel,
+                                panelHeight = null,
+                                onLutPick   = { scope.launch { DesktopFilePicker.pickLutFile(uiState.lutFolder)?.let { viewModel.importLut(it) } } },
+                                onStartCrop = viewModel::startCrop,
+                            )
+                        }
+                    }
+                }
+            } else {
+                // ── Bottom layout (default) ────────────────────────────────
+                // Full-screen image area
+                Box(
+                    modifier = Modifier
+                        .fillMaxSize()
+                        .background(MaterialTheme.colorScheme.surface)
+                        .padding(
+                            top    = with(density) { topBarHeightPx.toDp() },
+                            bottom = with(density) { bottomPanelHeightPx.toDp() },
+                        )
+                        .onSizeChanged { boxSize = it }
+                        .imageAreaScrollZoom(),
+                    contentAlignment = Alignment.Center,
+                ) { imageContent() }
+
+                // Top bar overlay
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.TopCenter)
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surface)
+                        .onSizeChanged { topBarHeightPx = it.height },
+                ) {
+                    Column {
+                        TopBar(
+                            canUndo      = uiState.canUndo,
+                            canRedo      = uiState.canRedo,
+                            hasImage     = uiState.sourceBitmap != null,
+                            canHistory   = uiState.historyEntries.size > 1,
+                            isProcessing = uiState.isProcessing,
+                            batchCount   = uiState.batchCount,
+                            batchIndex   = uiState.batchIndex,
+                            onOpen       = { scope.launch { val files = DesktopFilePicker.pickImageFiles(); if (files.isNotEmpty()) viewModel.loadImages(files) } },
+                            onUndo       = viewModel::undo,
+                            onRedo       = viewModel::redo,
+                            onReset      = viewModel::resetAll,
+                            onExport     = viewModel::export,
+                            onExportAll  = viewModel::exportAll,
+                            onSettings   = viewModel::openSettings,
+                            onSkip       = viewModel::skipImage,
+                            onHistory    = viewModel::openHistory,
+                        )
+                        HorizontalDivider()
+                    }
+                }
+
+                // Bottom edit panel overlay
+                Box(
+                    modifier = Modifier
+                        .align(Alignment.BottomCenter)
+                        .fillMaxWidth()
+                        .background(MaterialTheme.colorScheme.surface),
+                ) {
+                    Column {
+                        // Drag handle — drag up to expand, down to shrink
+                        Box(
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(dragHandleHeightDp)
+                                .pointerInput(Unit) {
+                                    detectVerticalDragGestures { _, dragAmountPx ->
+                                        val delta = with(density) { dragAmountPx.toDp() }
+                                        panelHeightDp = (panelHeightDp - delta)
+                                            .coerceIn(minPanelHeightDp, maxPanelHeightDp)
+                                    }
+                                },
+                            contentAlignment = Alignment.Center,
+                        ) {
+                            Box(
+                                modifier = Modifier
+                                    .width(32.dp)
+                                    .height(3.dp)
+                                    .background(MaterialTheme.colorScheme.onSurface.copy(alpha = 0.3f), CircleShape),
+                            )
+                        }
+                        HorizontalDivider()
+                        ToolControls(
+                            state       = uiState,
+                            viewModel   = viewModel,
+                            panelHeight = panelHeightDp,
+                            onLutPick   = { scope.launch { DesktopFilePicker.pickLutFile(uiState.lutFolder)?.let { viewModel.importLut(it) } } },
+                            onStartCrop = viewModel::startCrop,
+                        )
+                    }
                 }
             }
 
@@ -359,6 +496,8 @@ fun EditorScreen(
                     onQuality      = viewModel::setJpegQuality,
                     lutFolder      = uiState.lutFolder,
                     onLutFolder    = viewModel::setLutFolder,
+                    layoutMode     = uiState.layoutMode,
+                    onLayoutMode   = viewModel::setLayoutMode,
                     presets        = uiState.savedPresets,
                     hasImage       = uiState.sourceBitmap != null,
                     editState      = uiState.editState,
@@ -496,6 +635,7 @@ private fun historyLabel(index: Int, state: EditState, prev: EditState?): String
 private fun SettingsDialog(
     quality: Int, onQuality: (Int) -> Unit,
     lutFolder: String, onLutFolder: (String) -> Unit,
+    layoutMode: LayoutMode, onLayoutMode: (LayoutMode) -> Unit,
     presets: List<Preset>, hasImage: Boolean,
     editState: EditState, currentLut: LutFile?,
     onApplyPreset: (Preset) -> Unit, onSavePreset: (String, Set<PresetParam>) -> Unit,
@@ -528,6 +668,23 @@ private fun SettingsDialog(
                         modifier = Modifier.heightIn(max = 480.dp).verticalScroll(rememberScrollState()),
                         verticalArrangement = Arrangement.spacedBy(4.dp),
                     ) {
+                        Text("Layout", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
+                        HorizontalDivider()
+                        Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            FilterChip(
+                                selected = layoutMode == LayoutMode.BOTTOM,
+                                onClick  = { onLayoutMode(LayoutMode.BOTTOM) },
+                                label    = { Text("Bottom panel") },
+                                modifier = Modifier.weight(1f),
+                            )
+                            FilterChip(
+                                selected = layoutMode == LayoutMode.SIDE,
+                                onClick  = { onLayoutMode(LayoutMode.SIDE) },
+                                label    = { Text("Side panel") },
+                                modifier = Modifier.weight(1f),
+                            )
+                        }
+                        Spacer(Modifier.height(4.dp))
                         Text("Export", style = MaterialTheme.typography.labelSmall, color = MaterialTheme.colorScheme.primary)
                         HorizontalDivider()
                         Row(modifier = Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
@@ -692,9 +849,9 @@ private fun PresetParam.isNonDefault(state: EditState, hasLut: Boolean): Boolean
 // ── Tool controls ──────────────────────────────────────────────────────────────
 
 @Composable
-private fun ToolControls(state: EditorUiState, viewModel: EditorViewModel, onLutPick: () -> Unit, onStartCrop: () -> Unit) {
+private fun ToolControls(state: EditorUiState, viewModel: EditorViewModel, panelHeight: Dp?, onLutPick: () -> Unit, onStartCrop: () -> Unit) {
     val e = state.editState
-    Column(modifier = Modifier.fillMaxWidth().height(340.dp)) {
+    Column(modifier = Modifier.fillMaxWidth().let { if (panelHeight != null) it.height(panelHeight) else it.fillMaxHeight() }) {
         CategoryTabRow(selected = state.selectedCategory, onSelect = viewModel::selectCategory)
         HorizontalDivider()
         Column(modifier = Modifier.fillMaxWidth().weight(1f).verticalScroll(rememberScrollState())) {

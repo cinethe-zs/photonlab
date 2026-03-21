@@ -26,7 +26,10 @@ class EditPipeline {
 
     fun process(source: DesktopBitmap, state: EditState, lut: LutFile?, photoDate: java.util.Date? = null): DesktopBitmap {
         val preFrame = processUpToFrame(source, state, lut, photoDate)
-        return if (state.frameEnabled) applyFrame(preFrame, state) else preFrame
+        if (!state.frameEnabled) return preFrame
+        val framed = applyFrame(preFrame, state)
+        preFrame.recycle()
+        return framed
     }
 
     fun processAll(source: DesktopBitmap, state: EditState, lut: LutFile?, photoDate: java.util.Date? = null): Pair<DesktopBitmap, DesktopBitmap> {
@@ -36,16 +39,28 @@ class EditPipeline {
     }
 
     fun processUpToFrame(source: DesktopBitmap, state: EditState, lut: LutFile?, photoDate: java.util.Date? = null): DesktopBitmap {
+        fun recycle(prev: DesktopBitmap, next: DesktopBitmap) {
+            if (prev !== source && prev !== next) prev.recycle()
+        }
+
         val rotated     = applyRotation(source, state.rotation)
         val fineRotated = applyFineRotation(rotated, state.fineRotation)
+        recycle(rotated, fineRotated)
         val imprinted   = if (state.dateImprint.enabled && photoDate != null)
             DateImprintProcessor.burn(fineRotated, state.dateImprint, photoDate)
         else fineRotated
+        recycle(fineRotated, imprinted)
         val toneAdj     = applyTone(imprinted, state)
+        recycle(imprinted, toneAdj)
         val lutApplied  = if (lut != null) applyLut(toneAdj, lut) else toneAdj
+        recycle(toneAdj, lutApplied)
         val sharpened   = if (state.sharpening > 0f) applySharpening(lutApplied, state.sharpening) else lutApplied
+        recycle(lutApplied, sharpened)
         val noised      = if (state.noise != 0f) applyNoise(sharpened, state.noise) else sharpened
-        return applyCrop(noised, state)
+        recycle(sharpened, noised)
+        val cropped     = applyCrop(noised, state)
+        recycle(noised, cropped)
+        return cropped
     }
 
     fun destroy() = glslRenderer.destroy()

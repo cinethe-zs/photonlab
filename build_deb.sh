@@ -8,35 +8,59 @@ PROJ="$(dirname "$(realpath "$0")")"
 chmod +x "$PROJ/gradlew"
 cd "$PROJ"
 
-# Step 1: Run Gradle up to (but not including) the jpackage invocation
-# packageDeb fails at jpackage — we run it anyway to generate the args file,
-# then we re-run jpackage manually with patched paths.
-./gradlew :desktop:createRuntimeImage || true
+./gradlew :desktop:packageDeb
 
-# Step 2: Copy resources to Linux FS so jpackage can read them
-LINUX_TMP=/tmp/photonlab-deb-build
-mkdir -p "$LINUX_TMP"
-cp "$PROJ/desktop/src/main/resources/photonlab_icon.png" "$LINUX_TMP/icon.png"
+# Patch the .deb: add StartupWMClass to .desktop and register app icon in hicolor theme
+DEB_FILE=$(find "$PROJ/dist" -name "*.deb" | head -1)
+if [ -n "$DEB_FILE" ]; then
+    PATCH_DIR=/tmp/photonlab-deb-patch
+    rm -rf "$PATCH_DIR"
+    dpkg-deb -R "$DEB_FILE" "$PATCH_DIR"
 
-# Step 3: Generate the args file by running packageDeb (will fail at jpackage but creates args)
-./gradlew :desktop:packageDeb 2>&1 | grep -v "BUILD FAILED" | grep -v "Exception" || true
+    # Add StartupWMClass so Wayland/GNOME taskbar matches the .desktop entry
+    DESKTOP_FILE=$(find "$PATCH_DIR" -name "*.desktop" | head -1)
+    if [ -n "$DESKTOP_FILE" ] && ! grep -q "StartupWMClass" "$DESKTOP_FILE"; then
+        echo "StartupWMClass=photonlab" >> "$DESKTOP_FILE"
+    fi
 
-ARGS_FILE="$PROJ/desktop/build/compose/tmp/packageDeb.args.txt"
-if [ ! -f "$ARGS_FILE" ]; then
-    echo "ERROR: args file not found"
-    exit 1
+    # Register app icon in the hicolor icon theme (needed for store/launcher icon)
+    POSTINST="$PATCH_DIR/DEBIAN/postinst"
+    if ! grep -q "xdg-icon-resource install --context apps" "$POSTINST"; then
+        sed -i 's|xdg-desktop-menu install|xdg-icon-resource install --novendor --context apps --size 256 /opt/photonlab/lib/photonlab.png photonlab\nxdg-desktop-menu install|' "$POSTINST"
+    fi
+    POSTRM="$PATCH_DIR/DEBIAN/postrm"
+    if [ -f "$POSTRM" ] && ! grep -q "xdg-icon-resource uninstall --context apps" "$POSTRM"; then
+        sed -i 's|xdg-desktop-menu uninstall|xdg-icon-resource uninstall --novendor --context apps --size 256 photonlab\nxdg-desktop-menu uninstall|' "$POSTRM" 2>/dev/null || true
+    fi
+
+    # Add AppStream metadata so GNOME Software shows the correct icon in the install dialog
+    METAINFO_DIR="$PATCH_DIR/usr/share/metainfo"
+    APPINFO_ICON_DIR="$PATCH_DIR/usr/share/app-info/icons/hicolor/64x64/apps"
+    mkdir -p "$METAINFO_DIR" "$APPINFO_ICON_DIR"
+    python3 -c "
+from PIL import Image
+Image.open('$PROJ/desktop/src/main/resources/photonlab_icon.png') \
+    .resize((64, 64), Image.LANCZOS) \
+    .save('$APPINFO_ICON_DIR/photonlab.png')
+"
+    cat > "$METAINFO_DIR/photonlab.appdata.xml" << 'APPSTREAM_EOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>photonlab</id>
+  <name>PhotonLab</name>
+  <summary>Non-destructive photo editor</summary>
+  <metadata_license>MIT</metadata_license>
+  <description>
+    <p>PhotonLab is a fast, non-destructive photo editor with real-time editing.</p>
+  </description>
+  <launchable type="desktop-id">photonlab-photonlab.desktop</launchable>
+  <icon type="cached">photonlab.png</icon>
+</component>
+APPSTREAM_EOF
+
+    dpkg-deb --build --root-owner-group "$PATCH_DIR" "$DEB_FILE"
+    rm -rf "$PATCH_DIR"
 fi
 
-# Step 4: Patch the args file — replace icon path with Linux-native path
-PATCHED=/tmp/packageDeb.args.patched.txt
-sed "s|\".*photonlab_icon.png\"|\"$LINUX_TMP/icon.png\"|g" "$ARGS_FILE" > "$PATCHED"
-
-echo "=== Patched args ==="
-grep -i icon "$PATCHED"
-
-# Step 5: Run jpackage manually with patched args
-$JDK/bin/jpackage @"$PATCHED"
-
 echo "=== Build complete ==="
-# Find the output .deb
-find "$PROJ/desktop/build" -name "*.deb" 2>/dev/null
+find "$PROJ/dist" -name "*.deb" 2>/dev/null

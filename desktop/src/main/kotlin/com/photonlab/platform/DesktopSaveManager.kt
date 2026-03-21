@@ -38,6 +38,7 @@ object DesktopSaveManager {
             writer.write(null, IIOImage(rgbImage, null, null), writeParam)
             writer.dispose()
         }
+        rgbImage.flush()
         return file
     }
 }

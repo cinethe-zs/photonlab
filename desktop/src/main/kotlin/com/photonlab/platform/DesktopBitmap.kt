@@ -40,7 +40,7 @@ class DesktopBitmap(val image: BufferedImage) {
     /** Convert to Compose ImageBitmap for display in the UI. */
     fun asImageBitmap(): ImageBitmap = image.toComposeImageBitmap()
 
-    fun recycle() { /* no-op on desktop */ }
+    fun recycle() { image.flush() }
 
     companion object {
 

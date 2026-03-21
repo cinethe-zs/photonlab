@@ -15,17 +15,24 @@ compose.desktop {
         mainClass = "com.photonlab.MainKt"
 
         nativeDistributions {
-            // Output to TEMP so Windows Defender/Search Indexer never hold a handle on the exe dir.
+            // On Windows: output to TEMP so Windows Defender/Search Indexer never hold a handle on the exe dir.
+            // On Linux: output to dist/ inside the project.
             outputBaseDir.set(project.objects.directoryProperty().apply {
-                set(File(System.getProperty("java.io.tmpdir"), "photonlab-build5"))
+                set(if (System.getProperty("os.name").startsWith("Windows"))
+                    File(System.getProperty("java.io.tmpdir"), "photonlab-build5")
+                else
+                    project.rootDir.resolve("dist"))
             })
             targetFormats(TargetFormat.Deb, TargetFormat.AppImage, TargetFormat.Exe)
             packageName = "photonlab"
-            packageVersion = "1.2.2"
+            packageVersion = "2.0.0"
             description = "PhotonLab - Non-destructive photo editor"
             vendor = "PhotonLab"
 
-            val appIcon = project.file("src/main/resources/photonlab.ico")
+            val appIcon = if (System.getProperty("os.name").startsWith("Windows"))
+                project.file("src/main/resources/photonlab.ico")
+            else
+                project.file("src/main/resources/photonlab_icon.png")
             fileAssociation("image/jpeg",              "jpg",  "JPEG Image",  appIcon)
             fileAssociation("image/jpeg",              "jpeg", "JPEG Image",  appIcon)
             fileAssociation("image/png",               "png",  "PNG Image",   appIcon)

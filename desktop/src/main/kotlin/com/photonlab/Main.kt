@@ -15,7 +15,12 @@ import java.awt.dnd.DropTargetAdapter
 import java.awt.dnd.DropTargetDropEvent
 import java.io.File
 
-fun main() = application {
+fun main() {
+    // Must be set before AWT initialises so the X11 WM_CLASS matches
+    // StartupWMClass=photonlab in the .desktop file → GNOME taskbar shows correct icon.
+    System.setProperty("sun.awt.app.class", "photonlab")
+    @Suppress("NAME_SHADOWING")
+    return application {
     val viewModel = remember { EditorViewModel() }
 
     Window(
@@ -58,6 +63,34 @@ fun main() = application {
             onDispose { dropTarget.isActive = false }
         }
 
+        SideEffect {
+            runCatching {
+                // Try installed path first (jpackage puts the icon next to the binary),
+                // then fall back to the classpath resource for dev runs.
+                val img = sequenceOf(
+                    {
+                        ProcessHandle.current().info().command().orElse(null)
+                            ?.let { java.io.File(it).parentFile?.parentFile?.resolve("lib/photonlab.png") }
+                            ?.takeIf { it.exists() }
+                            ?.let { javax.imageio.ImageIO.read(it) }
+                    },
+                    {
+                        Thread.currentThread().contextClassLoader
+                            ?.getResourceAsStream("photonlab_icon.png")
+                            ?.let { javax.imageio.ImageIO.read(it) }
+                    },
+                ).mapNotNull { it() }.firstOrNull() ?: return@runCatching
+
+                window.iconImage = img
+                if (java.awt.Taskbar.isTaskbarSupported()) {
+                    val taskbar = java.awt.Taskbar.getTaskbar()
+                    if (taskbar.isSupported(java.awt.Taskbar.Feature.ICON_IMAGE)) {
+                        taskbar.iconImage = img
+                    }
+                }
+            }
+        }
+
         PhotonLabTheme {
             com.photonlab.ui.editor.EditorScreen(
                 viewModel = viewModel,
@@ -68,4 +101,5 @@ fun main() = application {
             )
         }
     }
+}
 }
