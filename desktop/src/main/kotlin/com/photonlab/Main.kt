@@ -22,8 +22,19 @@ fun main() {
     @Suppress("NAME_SHADOWING")
     return application {
     val viewModel = remember { EditorViewModel() }
+    val uiState by viewModel.uiState.collectAsState()
+
+    // When background-export finishes, clean up and exit (window may already be hidden)
+    LaunchedEffect(uiState.closeWindow) {
+        if (uiState.closeWindow) {
+            viewModel.closeWindowHandled()
+            viewModel.onCleared()
+            exitApplication()
+        }
+    }
 
     Window(
+        visible = !uiState.backgroundExporting,
         onCloseRequest = {
             if (viewModel.uiState.value.pendingExportCount > 0) {
                 // Prompt user — dialog shown inside EditorScreen via closeWindow state

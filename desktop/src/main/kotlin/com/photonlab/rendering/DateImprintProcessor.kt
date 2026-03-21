@@ -45,7 +45,7 @@ object DateImprintProcessor {
         val dateString = settings.style.format(date)
 
         // ── Size ─────────────────────────────────────────────────────────────
-        val textSize = (maxOf(w, h) * settings.sizePercent / 100f).coerceIn(6f, 96f)
+        val textSize = (maxOf(w, h) * settings.sizePercent / 100f).coerceAtLeast(6f)
 
         // ── Typeface ──────────────────────────────────────────────────────────
         val baseFont: Font = when (settings.font) {

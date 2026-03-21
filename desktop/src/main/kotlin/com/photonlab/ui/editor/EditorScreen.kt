@@ -133,14 +133,6 @@ fun EditorScreen(
         }
     }
 
-    // Close window when all background exports finish
-    LaunchedEffect(uiState.closeWindow) {
-        if (uiState.closeWindow) {
-            viewModel.closeWindowHandled()
-            onCloseWindow()
-        }
-    }
-
     Scaffold(
         snackbarHost   = { SnackbarHost(snackbarHostState) },
         containerColor = MaterialTheme.colorScheme.background,

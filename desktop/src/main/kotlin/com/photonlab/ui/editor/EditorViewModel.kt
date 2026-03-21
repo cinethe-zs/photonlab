@@ -95,6 +95,7 @@ data class EditorUiState(
     val pendingExportCount: Int = 0,
     val showExitConfirmDialog: Boolean = false,
     val closeWindow: Boolean = false,
+    val backgroundExporting: Boolean = false,
     val photoDate: java.util.Date? = null,
     val layoutMode: LayoutMode = LayoutMode.BOTTOM,
 )
@@ -484,7 +485,7 @@ class EditorViewModel {
     fun dismissExitDialog()  = _uiState.update { it.copy(showExitConfirmDialog = false) }
     fun runExportsInBackground() {
         shouldAutoClose = true
-        _uiState.update { it.copy(showExitConfirmDialog = false) }
+        _uiState.update { it.copy(showExitConfirmDialog = false, backgroundExporting = true) }
     }
     fun closeWindowHandled() = _uiState.update { it.copy(closeWindow = false) }
 
