@@ -1,0 +1,843 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>PhotonLab — User Documentation</title>
+  <style>
+    :root {
+      --bg:        #0f1117;
+      --surface:   #181c27;
+      --surface2:  #1e2332;
+      --border:    #2a2f42;
+      --accent:    #7c9eff;
+      --accent2:   #a5c8ff;
+      --text:      #e2e8f0;
+      --muted:     #8892a4;
+      --amber:     #ff6600;
+      --green:     #00cc44;
+      --cyan:      #00ccee;
+      --radius:    10px;
+      --font-mono: 'JetBrains Mono', 'Fira Code', 'Cascadia Code', monospace;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-size: 15px;
+      line-height: 1.7;
+    }
+
+    /* ── Layout ──────────────────────────────────────────────── */
+    .layout { display: flex; min-height: 100vh; }
+
+    nav {
+      width: 260px;
+      flex-shrink: 0;
+      background: var(--surface);
+      border-right: 1px solid var(--border);
+      position: sticky;
+      top: 0;
+      height: 100vh;
+      overflow-y: auto;
+      padding: 24px 0 32px;
+    }
+
+    nav .logo {
+      padding: 0 20px 20px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 12px;
+    }
+    nav .logo h1 { font-size: 18px; font-weight: 700; color: var(--accent2); letter-spacing: 0.03em; }
+    nav .logo p  { font-size: 12px; color: var(--muted); margin-top: 2px; }
+
+    nav ul { list-style: none; padding: 0; }
+    nav ul li a {
+      display: block;
+      padding: 6px 20px;
+      font-size: 13px;
+      color: var(--muted);
+      text-decoration: none;
+      border-left: 2px solid transparent;
+      transition: color .15s, border-color .15s, background .15s;
+    }
+    nav ul li a:hover,
+    nav ul li a.active {
+      color: var(--accent2);
+      border-left-color: var(--accent);
+      background: rgba(124,158,255,.07);
+    }
+    nav .nav-section {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: .1em;
+      color: var(--muted);
+      padding: 16px 20px 4px;
+    }
+
+    main { flex: 1; max-width: 900px; padding: 48px 48px 80px; }
+
+    /* ── Typography ───────────────────────────────────────────── */
+    h1 { font-size: 34px; font-weight: 800; color: var(--accent2); margin-bottom: 8px; }
+    h2 {
+      font-size: 22px; font-weight: 700; color: var(--accent2);
+      margin: 56px 0 16px;
+      padding-bottom: 10px;
+      border-bottom: 1px solid var(--border);
+      scroll-margin-top: 24px;
+    }
+    h3 { font-size: 16px; font-weight: 600; color: var(--text); margin: 28px 0 10px; scroll-margin-top: 24px; }
+    h4 { font-size: 14px; font-weight: 600; color: var(--accent); margin: 20px 0 8px; }
+    p  { color: var(--text); margin-bottom: 12px; }
+    a  { color: var(--accent); text-decoration: none; }
+    a:hover { text-decoration: underline; }
+
+    /* ── Hero ────────────────────────────────────────────────── */
+    .hero {
+      background: linear-gradient(135deg, #131829 0%, #1a2040 50%, #0f1624 100%);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 40px;
+      margin-bottom: 40px;
+    }
+    .hero h1 { margin-bottom: 12px; }
+    .hero p { color: var(--muted); font-size: 16px; margin-bottom: 20px; }
+    .hero .badges { display: flex; gap: 8px; flex-wrap: wrap; }
+    .badge {
+      display: inline-block;
+      padding: 4px 12px;
+      border-radius: 20px;
+      font-size: 12px;
+      font-weight: 600;
+      letter-spacing: .03em;
+    }
+    .badge-blue   { background: rgba(124,158,255,.15); color: #7c9eff; border: 1px solid rgba(124,158,255,.3); }
+    .badge-green  { background: rgba(0,204,68,.12);   color: #00cc44; border: 1px solid rgba(0,204,68,.3); }
+    .badge-amber  { background: rgba(255,102,0,.12);  color: #ff8c42; border: 1px solid rgba(255,102,0,.3); }
+    .badge-cyan   { background: rgba(0,204,238,.12);  color: #00ccee; border: 1px solid rgba(0,204,238,.3); }
+
+    /* ── Cards / Boxes ───────────────────────────────────────── */
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 24px;
+      margin-bottom: 20px;
+    }
+    .callout {
+      border-left: 3px solid var(--accent);
+      background: rgba(124,158,255,.06);
+      border-radius: 0 var(--radius) var(--radius) 0;
+      padding: 14px 18px;
+      margin: 16px 0;
+      font-size: 14px;
+      color: var(--muted);
+    }
+    .callout.tip   { border-color: var(--green); background: rgba(0,204,68,.06); }
+    .callout.warn  { border-color: var(--amber); background: rgba(255,102,0,.06); }
+
+    /* ── Tables ──────────────────────────────────────────────── */
+    .table-wrap { overflow-x: auto; margin: 16px 0 24px; border-radius: var(--radius); border: 1px solid var(--border); }
+    table { width: 100%; border-collapse: collapse; font-size: 13.5px; }
+    thead tr { background: var(--surface2); }
+    th { padding: 10px 16px; text-align: left; font-size: 12px; text-transform: uppercase; letter-spacing: .06em; color: var(--muted); font-weight: 600; }
+    td { padding: 10px 16px; border-top: 1px solid var(--border); vertical-align: top; }
+    tr:hover td { background: rgba(255,255,255,.02); }
+    td code { font-family: var(--font-mono); font-size: 12px; background: var(--surface2); padding: 1px 5px; border-radius: 4px; color: var(--cyan); }
+
+    /* ── Code ────────────────────────────────────────────────── */
+    code {
+      font-family: var(--font-mono);
+      font-size: 12.5px;
+      background: var(--surface2);
+      padding: 1px 6px;
+      border-radius: 4px;
+      color: var(--cyan);
+    }
+
+    /* ── Lists ───────────────────────────────────────────────── */
+    ul, ol { padding-left: 20px; margin-bottom: 14px; }
+    li { margin-bottom: 5px; }
+    ul.check { list-style: none; padding-left: 0; }
+    ul.check li::before { content: '✓ '; color: var(--green); font-weight: 700; }
+
+    /* ── Grid ────────────────────────────────────────────────── */
+    .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 16px 0; }
+    @media (max-width: 640px) { .grid-2 { grid-template-columns: 1fr; } }
+
+    /* ── Color swatches ──────────────────────────────────────── */
+    .swatches { display: flex; gap: 10px; flex-wrap: wrap; margin: 10px 0; }
+    .swatch { display: flex; align-items: center; gap: 8px; font-size: 13px; }
+    .swatch-dot { width: 18px; height: 18px; border-radius: 50%; border: 2px solid rgba(255,255,255,.2); flex-shrink: 0; }
+
+    /* ── Keyboard keys ───────────────────────────────────────── */
+    kbd {
+      display: inline-block;
+      padding: 2px 8px;
+      font-size: 12px;
+      font-family: var(--font-mono);
+      background: var(--surface2);
+      border: 1px solid var(--border);
+      border-radius: 5px;
+      color: var(--text);
+      box-shadow: 0 1px 0 var(--border);
+    }
+
+    /* ── Version history ─────────────────────────────────────── */
+    .version-entry { margin-bottom: 28px; padding-bottom: 28px; border-bottom: 1px solid var(--border); }
+    .version-entry:last-child { border-bottom: none; }
+    .version-tag {
+      display: inline-block;
+      font-size: 20px;
+      font-weight: 800;
+      color: var(--accent2);
+      margin-bottom: 4px;
+    }
+    .version-date { font-size: 13px; color: var(--muted); margin-bottom: 12px; }
+
+    /* ── Platform badges ─────────────────────────────────────── */
+    .platform { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 4px; margin-left: 6px; vertical-align: middle; }
+    .p-all     { background: rgba(124,158,255,.15); color: #7c9eff; }
+    .p-desktop { background: rgba(0,204,238,.12);  color: #00ccee; }
+    .p-android { background: rgba(0,204,68,.12);   color: #00cc44; }
+
+    /* ── TOC progress line ────────────────────────────────────── */
+    .progress { position: fixed; top: 0; left: 0; height: 2px; background: var(--accent); width: 0; transition: width .1s; z-index: 100; }
+
+    @media (max-width: 768px) {
+      nav { display: none; }
+      main { padding: 24px 20px 60px; }
+    }
+  </style>
+</head>
+<body>
+<div class="progress" id="progress"></div>
+
+<div class="layout">
+  <!-- Sidebar navigation -->
+  <nav id="sidebar">
+    <div class="logo">
+      <h1>PhotonLab</h1>
+      <p>User Documentation</p>
+    </div>
+    <ul>
+      <li><span class="nav-section">Getting Started</span></li>
+      <li><a href="#overview">Overview</a></li>
+      <li><a href="#installation">Installation</a></li>
+      <li><a href="#opening-images">Opening Images</a></li>
+
+      <li><span class="nav-section">Editing</span></li>
+      <li><a href="#tone">Tone Adjustments</a></li>
+      <li><a href="#color">Color Adjustments</a></li>
+      <li><a href="#lut">LUT (Color Grading)</a></li>
+      <li><a href="#transform">Transform</a></li>
+      <li><a href="#crop">Crop</a></li>
+      <li><a href="#frame">Frame / Border</a></li>
+      <li><a href="#date-imprint">Date Imprint</a></li>
+
+      <li><span class="nav-section">Interface</span></li>
+      <li><a href="#image-area">Image Area</a></li>
+      <li><a href="#grid">Grid Overlay</a></li>
+      <li><a href="#histogram">Histogram</a></li>
+      <li><a href="#compare">Compare Original</a></li>
+      <li><a href="#layouts">Panel Layouts</a></li>
+      <li><a href="#history">Edit History</a></li>
+      <li><a href="#presets">Presets</a></li>
+
+      <li><span class="nav-section">Batch & Export</span></li>
+      <li><a href="#batch">Batch Processing</a></li>
+      <li><a href="#export">Export</a></li>
+      <li><a href="#background-export">Background Export</a></li>
+
+      <li><span class="nav-section">Settings & Shortcuts</span></li>
+      <li><a href="#settings">Settings</a></li>
+      <li><a href="#shortcuts">Keyboard Shortcuts</a></li>
+
+      <li><span class="nav-section">Platform Notes</span></li>
+      <li><a href="#desktop">Desktop (Linux / Windows)</a></li>
+      <li><a href="#android">Android</a></li>
+
+      <li><span class="nav-section">Release Notes</span></li>
+      <li><a href="#changelog">Version History</a></li>
+    </ul>
+  </nav>
+
+  <!-- Main content -->
+  <main>
+
+    <!-- Hero -->
+    <div class="hero">
+      <h1>PhotonLab</h1>
+      <p>Fast, non-destructive photo editor for Android and Linux/Windows desktop. All edits are applied in real time — the original image is never modified.</p>
+      <div class="badges">
+        <span class="badge badge-blue">v2.0.1</span>
+        <span class="badge badge-green">Android</span>
+        <span class="badge badge-cyan">Linux</span>
+        <span class="badge badge-amber">Windows</span>
+      </div>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────── -->
+    <h2 id="overview">Overview</h2>
+    <p>PhotonLab is a photo editor focused on speed and simplicity. It offers a complete set of tone, color, and creative tools with a clean dark interface. The same edit pipeline runs on Android (via AGSL shaders) and desktop (via LWJGL/OpenGL), so results are identical across platforms.</p>
+
+    <div class="grid-2">
+      <div class="card">
+        <h4>Non-destructive</h4>
+        <p>Every adjustment is stored as parameters in an <code>EditState</code>. The source image is never overwritten — export creates a new file.</p>
+      </div>
+      <div class="card">
+        <h4>Real-time preview</h4>
+        <p>Changes are rendered immediately. A quick 512 px preview appears instantly; a full-resolution preview follows within 250 ms.</p>
+      </div>
+      <div class="card">
+        <h4>Batch processing</h4>
+        <p>Open multiple images at once, edit each independently, and export them all with a single tap. Each image remembers its own settings.</p>
+      </div>
+      <div class="card">
+        <h4>Full resolution export</h4>
+        <p>Export renders at the original source resolution with no downsampling, regardless of preview zoom level.</p>
+      </div>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────── -->
+    <h2 id="installation">Installation</h2>
+
+    <h3>Linux (.deb — Ubuntu / Debian)</h3>
+    <ol>
+      <li>Download <code>photonlab_2.0.1_amd64.deb</code> from the <a href="https://github.com/cinethe-zs/photonlab/releases/tag/v2.0.1">GitHub Releases page</a>.</li>
+      <li>Double-click the file in your file manager, or install via terminal:<br>
+        <code>sudo dpkg -i photonlab_2.0.1_amd64.deb</code></li>
+      <li>If dependency errors appear: <code>sudo apt-get install -f</code></li>
+      <li>Launch from your application menu, or run <code>photonlab</code> in a terminal.</li>
+    </ol>
+    <div class="callout tip">Requires a 64-bit system. Compatible with Ubuntu 20.04 LTS and later, and equivalent Debian versions.</div>
+
+    <h3>Windows</h3>
+    <p>Build from source using <code>buildExe.bat</code> (requires JDK 21 and Gradle). A pre-built <code>.exe</code> installer will be available in a future release.</p>
+
+    <h3>Android</h3>
+    <p>Install the APK directly or via Google Play (when available). Requires Android 8.0 (API 26) or later.</p>
+
+    <!-- ─────────────────────────────────────────────────────── -->
+    <h2 id="opening-images">Opening Images</h2>
+
+    <h3>Single image</h3>
+    <p>Click the <strong>folder icon</strong> in the top bar (or drag and drop a file onto the window on desktop). PhotonLab supports JPEG, PNG, HEIC, WebP and all formats your platform's image loader supports.</p>
+
+    <h3>Batch (multiple images)</h3>
+    <p>In the file picker, select multiple image files. PhotonLab loads them as a batch. Navigate between images using the <strong>arrow buttons</strong> in the top bar or by swiping left/right on the image.</p>
+    <div class="callout tip">Each image in a batch remembers its own edit settings. Switching images saves the current state automatically.</div>
+
+    <h3>Drag &amp; Drop <span class="platform p-desktop">Desktop</span></h3>
+    <p>Drop one or more image files directly onto the PhotonLab window to open them.</p>
+
+    <!-- ─────────────────────────────────────────────────────── -->
+    <h2 id="tone">Tone Adjustments</h2>
+    <p>Found in the <strong>TONE</strong> tab. These sliders affect the overall brightness and contrast of the image.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Parameter</th><th>Range</th><th>Default</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Exposure</strong></td><td>−5 to +5 EV</td><td>0</td><td>Multiplicative brightness on linear light — mimics camera exposure. Each +1 doubles the brightness.</td></tr>
+          <tr><td><strong>Luminosity</strong></td><td>−100 to +100</td><td>0</td><td>Additive brightness offset applied after exposure. Lighter touch than exposure.</td></tr>
+          <tr><td><strong>Contrast</strong></td><td>−100 to +100</td><td>0</td><td>S-curve contrast. Positive values make darks darker and lights lighter.</td></tr>
+          <tr><td><strong>Highlights</strong></td><td>−100 to +100</td><td>0</td><td>Adjusts only bright tones. Pull down to recover blown highlights.</td></tr>
+          <tr><td><strong>Shadows</strong></td><td>−100 to +100</td><td>0</td><td>Adjusts only dark tones. Push up to lift shadows without affecting highlights.</td></tr>
+          <tr><td><strong>Sharpening</strong></td><td>0 to 100</td><td>0</td><td>Unsharp mask sharpening. Increases local contrast along edges.</td></tr>
+          <tr><td><strong>Noise / Grain</strong></td><td>−100 to +100</td><td>0</td><td>Negative: multi-pass Gaussian denoise. Positive: procedural film grain (luminance + chroma).</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <div class="callout">Double-click any slider to reset it to its default value.</div>
+
+    <!-- ─────────────────────────────────────────────────────── -->
+    <h2 id="color">Color Adjustments</h2>
+    <p>Found in the <strong>COLOR</strong> tab.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Parameter</th><th>Range</th><th>Default</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Saturation</strong></td><td>−100 to +100</td><td>0</td><td>Adjusts HSL saturation of all colors equally. −100 produces a grayscale image.</td></tr>
+          <tr><td><strong>Vibrance</strong></td><td>−100 to +100</td><td>0</td><td>Intelligent saturation: boosts muted colors more than already-vivid ones. Gentler than Saturation.</td></tr>
+          <tr><td><strong>Temperature</strong></td><td>−100 to +100</td><td>0</td><td>Shifts the color balance cool (blue) ↔ warm (orange). Simulates white balance adjustment.</td></tr>
+          <tr><td><strong>Tint</strong></td><td>−100 to +100</td><td>0</td><td>Shifts the color balance green ↔ magenta. Used alongside Temperature for accurate white balance.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────── -->
+    <h2 id="lut">LUT (Color Grading)</h2>
+    <p>Found in the <strong>LUT</strong> tab. LUTs (Look-Up Tables) apply a pre-defined color grade to your image — useful for cinematic looks, film emulation, and consistent cross-image grading.</p>
+
+    <h3>Supported formats</h3>
+    <ul>
+      <li><strong>.cube</strong> — 3D LUT files (industry-standard, any grid size)</li>
+      <li><strong>HaldCLUT PNG</strong> — Hald Color Look-Up Tables stored as PNG images</li>
+    </ul>
+
+    <h3>Importing a LUT</h3>
+    <ol>
+      <li>Go to the <strong>LUT</strong> tab.</li>
+      <li>Click <strong>Import LUT</strong> and select a <code>.cube</code> or HaldCLUT PNG file.</li>
+      <li>The LUT is applied instantly and shown as the active LUT.</li>
+      <li>Click the <strong>✕</strong> button next to the LUT name to remove it.</li>
+    </ol>
+
+    <div class="callout tip">On desktop, you can set a <strong>LUT folder</strong> in Settings so the file picker opens there by default.</div>
+
+    <h3>LUT in presets</h3>
+    <p>When saving a preset, you can include the current LUT so it's applied automatically when the preset is loaded.</p>
+
+    <!-- ─────────────────────────────────────────────────────── -->
+    <h2 id="transform">Transform</h2>
+    <p>Found in the <strong>TRANSFORM</strong> tab. Transform settings are applied before tone and color adjustments.</p>
+
+    <h3>Rotation</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Control</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td>Rotate 90° CW / CCW buttons</td><td>Rotates the image by 90° clockwise or counter-clockwise.</td></tr>
+          <tr><td><strong>Fine Rotation</strong> slider</td><td>−45° to +45° in 0.1° steps. Zoom-to-fill is applied automatically so no black bars appear.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────── -->
+    <h2 id="crop">Crop</h2>
+    <p>Click <strong>Crop Image</strong> in the TRANSFORM tab to open the full-screen interactive crop editor.</p>
+
+    <h3>Aspect ratio options</h3>
+    <ul>
+      <li><strong>Free</strong> — drag handles to any shape</li>
+      <li><strong>1:1</strong> — square</li>
+      <li><strong>4:3</strong> — classic photo / screen</li>
+      <li><strong>3:2</strong> — standard DSLR sensor</li>
+      <li><strong>9:16</strong> — portrait / mobile screen</li>
+    </ul>
+    <p>The crop is stored as normalized coordinates (0–1) and applied non-destructively. The full image remains available until export.</p>
+
+    <!-- ─────────────────────────────────────────────────────── -->
+    <h2 id="frame">Frame / Border</h2>
+    <p>Found in the <strong>TRANSFORM</strong> tab. Adds a solid-color border around the image.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Parameter</th><th>Options / Range</th><th>Default</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Enable</strong></td><td>Toggle switch</td><td>Off</td></tr>
+          <tr><td><strong>Color</strong></td><td>White, Black, Light Gray, Dark Gray</td><td>White</td></tr>
+          <tr><td><strong>Size</strong></td><td>0–30% of shorter canvas dimension (step 0.5)</td><td>3%</td></tr>
+          <tr><td><strong>Aspect ratio</strong></td><td>Original, 1:1, 4:3, 3:2, 9:16</td><td>Original</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout">The aspect ratio setting on the frame expands the canvas to the target ratio before adding the border. This is separate from the crop aspect ratio.</div>
+
+    <!-- ─────────────────────────────────────────────────────── -->
+    <h2 id="date-imprint">Date Imprint</h2>
+    <p>Found in the <strong>TRANSFORM</strong> tab. Burns a film-style date stamp onto the image, drawn from the photo's EXIF metadata. Applied before tone grading for an authentic film-camera look.</p>
+
+    <div class="callout warn">If the image has no EXIF date, the stamp will show "No EXIF date" in the preview. Make sure your source files contain EXIF date information.</div>
+
+    <h3>Style (18 formats)</h3>
+    <p>Selected via a dropdown menu showing the formatted example output for the current photo's date.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Style</th><th>Example output</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><code>CLASSIC</code></td><td>DEC 24 '95</td><td>Original disposable-camera look</td></tr>
+          <tr><td><code>YEAR_FIRST</code></td><td>'95 DEC 24</td><td>Year-first variant</td></tr>
+          <tr><td><code>WITH_TIME</code></td><td>24 DEC 14:30</td><td>Date + time, no year</td></tr>
+          <tr><td><code>NUMERIC_EU</code></td><td>24.12.95</td><td>European dot separators</td></tr>
+          <tr><td><code>NUMERIC_US</code></td><td>12/24/95</td><td>US slash separators</td></tr>
+          <tr><td><code>DD_MM_YY</code></td><td>24 12 95</td><td>Space-separated EU, 2-digit year</td></tr>
+          <tr><td><code>MM_DD_YY</code></td><td>12 24 95</td><td>Space-separated US, 2-digit year</td></tr>
+          <tr><td><code>YY_MM_DD</code></td><td>'26 03 13</td><td>ISO-ish with apostrophe year</td></tr>
+          <tr><td><code>YYYY_MM_DD</code></td><td>2026 03 13</td><td>Space-separated, 4-digit year first</td></tr>
+          <tr><td><code>DD_MM_YYYY</code></td><td>24.12.2026</td><td>EU full 4-digit year</td></tr>
+          <tr><td><code>MM_DD_YYYY</code></td><td>12/24/2026</td><td>US full 4-digit year</td></tr>
+          <tr><td><code>ISO_8601</code></td><td>2026-12-24</td><td>ISO 8601 with dashes</td></tr>
+          <tr><td><code>DD_MMM_YYYY</code></td><td>24 DEC 2026</td><td>Day + text month + full year</td></tr>
+          <tr><td><code>MMM_YYYY</code></td><td>DEC 2026</td><td>Month and year only</td></tr>
+          <tr><td><code>DATETIME_EU</code></td><td>24.12.95 14:30</td><td>EU date + time</td></tr>
+          <tr><td><code>DATETIME_US</code></td><td>12/24/95 14:30</td><td>US date + time</td></tr>
+          <tr><td><code>DATETIME_ISO</code></td><td>2026-12-24 14:30</td><td>ISO date + time</td></tr>
+          <tr><td><code>TIME_ONLY</code></td><td>14:30</td><td>Time only, no date</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Colors</h3>
+    <div class="swatches">
+      <div class="swatch"><div class="swatch-dot" style="background:#FF6600"></div> Amber</div>
+      <div class="swatch"><div class="swatch-dot" style="background:#DD2222"></div> Red</div>
+      <div class="swatch"><div class="swatch-dot" style="background:#F0F0F0"></div> White</div>
+      <div class="swatch"><div class="swatch-dot" style="background:#FFE600"></div> Gold</div>
+      <div class="swatch"><div class="swatch-dot" style="background:#00CC44"></div> Green</div>
+      <div class="swatch"><div class="swatch-dot" style="background:#00CCEE"></div> Cyan</div>
+    </div>
+
+    <h3>Fonts</h3>
+    <ul>
+      <li><strong>LED</strong> — 7-segment LED display font (most authentic film-camera look)</li>
+      <li><strong>MONO</strong> — Monospace</li>
+      <li><strong>BOLD</strong> — Bold sans-serif</li>
+      <li><strong>SERIF</strong> — Serif</li>
+      <li><strong>COND</strong> — Condensed</li>
+    </ul>
+
+    <h3>Position</h3>
+    <ul>
+      <li>Bottom-Right (default) · Bottom-Left · Bottom-Center · Top-Right · Top-Left</li>
+    </ul>
+
+    <h3>Size &amp; effects sliders</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Slider</th><th>Range</th><th>Default</th><th>Description</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Size</strong></td><td>1–4% (step 0.1)</td><td>2%</td><td>Percentage of the image's longest dimension. No upper cap — large values work on high-res images.</td></tr>
+          <tr><td><strong>Opacity</strong></td><td>0–100</td><td>50</td><td>Overall transparency of the stamp.</td></tr>
+          <tr><td><strong>Glow</strong></td><td>0–100</td><td>100</td><td>Warm halo glow around the text.</td></tr>
+          <tr><td><strong>Blur</strong></td><td>0–100</td><td>50</td><td>Soft glow blur radius.</td></tr>
+          <tr><td><strong>Repeat</strong></td><td>1–20</td><td>3</td><td>Number of blur passes — higher values create a smoother, more diffused glow.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────── -->
+    <h2 id="image-area">Image Area</h2>
+
+    <h3>Zoom &amp; Pan</h3>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Gesture / Input</th><th>Action</th><th>Platform</th></tr></thead>
+        <tbody>
+          <tr><td>Pinch</td><td>Zoom in / out</td><td><span class="platform p-android">Android</span></td></tr>
+          <tr><td>Scroll wheel</td><td>Zoom in / out (×1.1 per step)</td><td><span class="platform p-desktop">Desktop</span></td></tr>
+          <tr><td><kbd>+</kbd> / <kbd>=</kbd> / <kbd>Numpad +</kbd></td><td>Zoom in (×1.2)</td><td><span class="platform p-desktop">Desktop</span></td></tr>
+          <tr><td><kbd>−</kbd> / <kbd>Numpad −</kbd></td><td>Zoom out (÷1.2)</td><td><span class="platform p-desktop">Desktop</span></td></tr>
+          <tr><td>Drag</td><td>Pan (when zoomed in)</td><td><span class="platform p-all">All</span></td></tr>
+          <tr><td>Double-tap / Double-click</td><td>Reset zoom to 1× (fit)</td><td><span class="platform p-all">All</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Zoom range: <code>1×</code> (fit to view) to <code>8×</code>. The preview automatically increases resolution as you zoom in for sharper detail.</p>
+
+    <!-- ─────────────────────────────────────────────────────── -->
+    <h2 id="grid">Grid Overlay</h2>
+    <p>Click the grid icon in the top-right of the image area to cycle through overlay modes:</p>
+    <ul>
+      <li><strong>None</strong> — no overlay</li>
+      <li><strong>Rule of Thirds</strong> — 3×3 composition guide</li>
+      <li><strong>Ninths</strong> — 9×9 dense grid</li>
+      <li><strong>Golden Ratio</strong> — guides at φ ≈ 0.618 and 1−φ ≈ 0.382</li>
+    </ul>
+    <p>The grid is constrained to the image bounds and transforms with zoom and pan.</p>
+
+    <!-- ─────────────────────────────────────────────────────── -->
+    <h2 id="histogram">Histogram</h2>
+    <p>Click the histogram icon in the top-right of the image area to toggle the RGB histogram overlay. It displays in the bottom-left corner of the image.</p>
+    <ul>
+      <li>Channels: Red, Green, Blue</li>
+      <li>Logarithmic scale — reveals detail in both highlights and shadows</li>
+      <li>Semi-transparent overlay — does not obstruct the image</li>
+      <li>Updates live as you move sliders</li>
+    </ul>
+
+    <!-- ─────────────────────────────────────────────────────── -->
+    <h2 id="compare">Compare Original</h2>
+    <p><strong>Press and hold</strong> on the image to temporarily display the unedited original. Release to return to the current edit.</p>
+    <p>A small <code>ORIGINAL</code> label appears in the corner while comparing. The original is shown at the same zoom and pan position as the current edit.</p>
+
+    <!-- ─────────────────────────────────────────────────────── -->
+    <h2 id="layouts">Panel Layouts <span class="platform p-desktop">Desktop</span></h2>
+    <p>Two layout modes are available on desktop, selectable in <strong>Settings</strong>. The choice is saved and remembered across sessions.</p>
+
+    <div class="grid-2">
+      <div class="card">
+        <h4>Bottom (default)</h4>
+        <p>The image fills the entire window. The tool panel overlays from the bottom. Drag the handle at the top of the panel to resize it.</p>
+        <p>Panel height: 48 dp min · 600 dp max · 340 dp default.</p>
+      </div>
+      <div class="card">
+        <h4>Side</h4>
+        <p>The image occupies the left side; the tool panel is on the right. Drag the vertical divider to resize.</p>
+        <p>Panel width: 240 dp min · 520 dp max · 320 dp default.</p>
+      </div>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────── -->
+    <h2 id="history">Edit History</h2>
+    <p>PhotonLab maintains a full undo/redo history for every image.</p>
+    <ul>
+      <li><strong>Undo</strong> / <strong>Redo</strong> buttons in the top bar</li>
+      <li><strong>History dialog</strong>: click the history icon to see a list of all states. Click any entry to jump directly to that point.</li>
+      <li>Continuous slider drags are compressed into a single history entry (so undo steps over whole adjustments, not individual pixel changes).</li>
+    </ul>
+
+    <!-- ─────────────────────────────────────────────────────── -->
+    <h2 id="presets">Presets</h2>
+    <p>Presets let you save a group of adjustments and apply them to other images in one click.</p>
+
+    <h3>Saving a preset</h3>
+    <ol>
+      <li>Open <strong>Settings</strong> → <strong>Presets</strong> → <strong>Create Preset</strong>.</li>
+      <li>Enter a name and choose which parameters to include.</li>
+    </ol>
+
+    <h3>Included parameters</h3>
+    <p>Any combination of: Exposure, Luminosity, Contrast, Highlights, Shadows, Saturation, Vibrance, Temperature, Tint, Sharpening, Noise, Rotation, LUT, Frame, Date Imprint.</p>
+
+    <h3>Applying to a batch</h3>
+    <p>When applying a preset to a batch image that hasn't been edited yet, you'll be asked whether to auto-apply the same preset to all remaining unedited images.</p>
+
+    <h3>Managing presets</h3>
+    <ul>
+      <li><strong>Apply</strong> — applies the preset to the current image</li>
+      <li><strong>Rename</strong> — renames the preset</li>
+      <li><strong>Delete</strong> — removes the preset (with confirmation)</li>
+    </ul>
+
+    <!-- ─────────────────────────────────────────────────────── -->
+    <h2 id="batch">Batch Processing</h2>
+    <p>Open multiple images with the file picker (or drag multiple files onto the window). PhotonLab loads them all into a batch queue.</p>
+
+    <h3>Navigating images</h3>
+    <ul>
+      <li>Use the <strong>← →</strong> buttons in the top bar.</li>
+      <li>Swipe left/right on the image (swipe at least 80 dp to trigger navigation).</li>
+      <li>A progress indicator shows "N / M" (current / total).</li>
+    </ul>
+
+    <h3>Per-image settings</h3>
+    <p>Each image remembers its own edit settings independently. Switching away from an image saves its state automatically.</p>
+
+    <h3>Reset an image</h3>
+    <p>Press the <strong>Reset</strong> button (↺ icon) in the top bar to clear all edits for the current image.</p>
+
+    <!-- ─────────────────────────────────────────────────────── -->
+    <h2 id="export">Export</h2>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Button</th><th>Action</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Export</strong></td><td>Saves the current image with all edits applied.</td></tr>
+          <tr><td><strong>Export all</strong></td><td>Queues all images in the batch for export. Runs in the background.</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <h3>Output</h3>
+    <ul>
+      <li><strong>Format</strong>: JPEG</li>
+      <li><strong>Quality</strong>: Configurable 50–100% (default 95%). Set in Settings.</li>
+      <li><strong>Resolution</strong>: Full source resolution — no downsampling.</li>
+      <li><strong>Filename</strong>: <code>photonlab_&lt;timestamp&gt;.jpg</code></li>
+      <li><strong>Location</strong>: <code>~/Pictures/PhotonLab/</code> (desktop) or device gallery (Android).</li>
+    </ul>
+
+    <div class="callout tip">A snackbar notification shows the saved file path after each successful export.</div>
+
+    <!-- ─────────────────────────────────────────────────────── -->
+    <h2 id="background-export">Background Export</h2>
+    <p>If you try to close PhotonLab while exports are still processing, a dialog appears with three options:</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Option</th><th>Behavior</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Continue in background</strong></td><td>The window closes (or hides). PhotonLab continues processing all queued exports silently and exits automatically when the last export is done.</td></tr>
+          <tr><td><strong>Wait</strong></td><td>The dialog stays open. PhotonLab finishes all exports while you watch the count go down, then you can close normally.</td></tr>
+          <tr><td><strong>Close anyway</strong></td><td>Force-closes immediately. Any remaining queued exports are cancelled.</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <div class="callout warn">Using <strong>Close anyway</strong> will discard unfinished exports. Use <strong>Continue in background</strong> to safely complete all work.</div>
+
+    <!-- ─────────────────────────────────────────────────────── -->
+    <h2 id="settings">Settings</h2>
+    <p>Open Settings via the gear icon in the top bar.</p>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Setting</th><th>Description</th><th>Platform</th></tr></thead>
+        <tbody>
+          <tr><td><strong>Layout</strong></td><td>Switch between Bottom and Side panel layouts.</td><td><span class="platform p-desktop">Desktop</span></td></tr>
+          <tr><td><strong>JPEG Quality</strong></td><td>Export quality from 50–100% (default 95%).</td><td><span class="platform p-all">All</span></td></tr>
+          <tr><td><strong>LUT Folder</strong></td><td>Default folder opened by the LUT file picker.</td><td><span class="platform p-desktop">Desktop</span></td></tr>
+          <tr><td><strong>Presets</strong></td><td>View, apply, rename and delete saved presets.</td><td><span class="platform p-all">All</span></td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────── -->
+    <h2 id="shortcuts">Keyboard Shortcuts <span class="platform p-desktop">Desktop</span></h2>
+
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Key(s)</th><th>Action</th></tr></thead>
+        <tbody>
+          <tr><td><kbd>+</kbd> &nbsp;/&nbsp; <kbd>=</kbd> &nbsp;/&nbsp; <kbd>Numpad +</kbd></td><td>Zoom in (×1.2)</td></tr>
+          <tr><td><kbd>−</kbd> &nbsp;/&nbsp; <kbd>Numpad −</kbd></td><td>Zoom out (÷1.2)</td></tr>
+          <tr><td>Scroll wheel ↑</td><td>Zoom in (×1.1)</td></tr>
+          <tr><td>Scroll wheel ↓</td><td>Zoom out (÷1.1)</td></tr>
+        </tbody>
+      </table>
+    </div>
+
+    <!-- ─────────────────────────────────────────────────────── -->
+    <h2 id="desktop">Desktop (Linux / Windows)</h2>
+
+    <h3>System requirements</h3>
+    <ul>
+      <li>64-bit OS — Ubuntu 20.04+ or equivalent Debian, Windows 10+</li>
+      <li>OpenGL 3.3 compatible GPU (used for tone rendering acceleration)</li>
+      <li>JRE 21 is bundled — no separate Java installation needed</li>
+      <li>~200 MB disk space</li>
+    </ul>
+
+    <h3>GPU-accelerated rendering</h3>
+    <p>Tone adjustments (exposure, contrast, saturation, etc.) are processed via an LWJGL offscreen OpenGL context using custom GLSL shaders. A CPU fallback is used automatically if OpenGL is unavailable.</p>
+
+    <h3>Adaptive preview resolution</h3>
+    <p>PhotonLab uses a two-phase rendering strategy:</p>
+    <ol>
+      <li><strong>Quick preview</strong> (512 px): rendered immediately when any parameter changes.</li>
+      <li><strong>Full preview</strong> (<code>1920 px × zoom factor</code>): rendered 250 ms after the last change. Zooming in triggers a higher-resolution render automatically.</li>
+    </ol>
+
+    <h3>Linux icon &amp; taskbar</h3>
+    <p>PhotonLab uses three mechanisms to ensure the correct icon appears everywhere:</p>
+    <ul>
+      <li>X11 WM_CLASS set to <code>photonlab</code> for correct taskbar grouping</li>
+      <li><code>StartupWMClass=photonlab</code> in the <code>.desktop</code> file for GNOME taskbar matching</li>
+      <li>AppStream metadata bundled in the <code>.deb</code> for the correct icon in GNOME Software</li>
+    </ul>
+
+    <!-- ─────────────────────────────────────────────────────── -->
+    <h2 id="android">Android</h2>
+
+    <h3>Requirements</h3>
+    <ul>
+      <li>Android 8.0 (API 26) or later</li>
+      <li>~50 MB storage</li>
+    </ul>
+
+    <h3>Permissions</h3>
+    <ul>
+      <li><code>READ_MEDIA_IMAGES</code> — Android 13+ (API 33+)</li>
+      <li><code>READ_EXTERNAL_STORAGE</code> — Android 8–12 (API 26–32)</li>
+    </ul>
+
+    <h3>Rendering</h3>
+    <p>On Android 13+ (API 33+): AGSL RuntimeShader pipeline for GPU-accelerated rendering. On older devices: automatic CPU fallback via RenderScript Compat.</p>
+
+    <h3>Export location</h3>
+    <p>Exported files are saved to the device gallery via MediaStore. No <code>WRITE_EXTERNAL_STORAGE</code> permission required on Android 10+.</p>
+
+    <h3>Background export</h3>
+    <p>Pressing back while exports are in progress shows the same three-option dialog as desktop. <strong>Continue in background</strong> moves the app to the background; it finishes processing and calls <code>finish()</code> automatically when done.</p>
+
+    <!-- ─────────────────────────────────────────────────────── -->
+    <h2 id="changelog">Version History</h2>
+
+    <div class="version-entry">
+      <div class="version-tag">v2.0.1</div>
+      <div class="version-date">March 21, 2026</div>
+      <ul>
+        <li>Fixed <code>.deb</code> installation failure on older Ubuntu/Debian — replaced <code>libasound2t64</code> and <code>libpng16-16t64</code> hard dependencies with OR alternatives that also accept the non-<code>t64</code> variants.</li>
+        <li>Removed the 96 px upper cap on date imprint text size — the stamp now scales freely based on the size percentage, with only a 6 px minimum enforced.</li>
+        <li>Style selector for date imprint changed from a horizontally scrollable chip row to a compact dropdown menu.</li>
+        <li>Pending export counter now reflects all queued jobs (not just the one currently processing), so "Continue in background" correctly waits for the full batch.</li>
+        <li>Fixed "Continue in background" on close: the process now stays alive until every export in the queue is complete, then exits automatically.</li>
+      </ul>
+    </div>
+
+    <div class="version-entry">
+      <div class="version-tag">v2.0.0</div>
+      <div class="version-date">March 21, 2026</div>
+      <ul>
+        <li><strong>Linux &amp; Windows desktop port</strong> via Compose Multiplatform and LWJGL/GLSL rendering.</li>
+        <li><strong>Two panel layouts</strong>: Bottom (default) and Side, both resizable by dragging the divider. Persisted across sessions.</li>
+        <li><strong>Two-phase adaptive preview</strong>: 512 px instant preview + full-resolution (<code>1920 px × zoom</code>) preview after 250 ms debounce.</li>
+        <li><strong>Zoom &amp; pan</strong>: 1×–8×, scroll wheel, keyboard shortcuts, drag.</li>
+        <li><strong>Drag &amp; drop</strong>: drop image files onto the window to open them.</li>
+        <li><strong>Grid overlays</strong>: Rule of Thirds, Ninths, Golden Ratio. Constrained to image bounds.</li>
+        <li><strong>RGB Histogram</strong>: logarithmic scale overlay in the image area.</li>
+        <li><strong>Date imprint</strong>: 18 format styles, 6 colors, 5 fonts, 5 positions, glow/blur/opacity/repeat controls.</li>
+        <li><strong>Film grain</strong>: procedural luminance + chroma grain generator.</li>
+        <li><strong>Background export on close</strong>: window hides, process exits when all exports are done.</li>
+        <li><strong>Memory-safe batch export</strong>: images loaded one at a time in the export consumer to prevent Java heap exhaustion.</li>
+        <li><strong>Intermediate bitmap recycling</strong> in the rendering pipeline to reduce GC pressure.</li>
+        <li><strong>Always dark theme</strong> on desktop (Android follows system theme).</li>
+        <li><strong>GNOME integration</strong>: correct taskbar icon, GNOME Software icon, <code>StartupWMClass</code> in <code>.desktop</code>.</li>
+        <li>Date imprint size based on the <strong>longest image dimension</strong> (was width).</li>
+        <li>Date imprint applied <strong>before</strong> tone grading in the pipeline for authentic film-camera behavior.</li>
+        <li>Package version scheme: <code>major.minor.patch</code> starting at <code>2.0.0</code>.</li>
+      </ul>
+    </div>
+
+    <div class="version-entry">
+      <div class="version-tag">v1.2.x</div>
+      <div class="version-date">2025 — Android</div>
+      <ul>
+        <li>Saturation and vibrance tuning.</li>
+        <li>Procedural film grain generator.</li>
+        <li>GPU rendering pipeline (AGSL RuntimeShader).</li>
+        <li>LUT preset persistence.</li>
+      </ul>
+    </div>
+
+    <div class="version-entry">
+      <div class="version-tag">v1.0</div>
+      <div class="version-date">2024 — Android</div>
+      <ul>
+        <li>Initial Android release.</li>
+        <li>Core tone and color adjustments.</li>
+        <li>LUT support (.cube and HaldCLUT).</li>
+        <li>Non-destructive crop and rotation.</li>
+        <li>JPEG export to device gallery.</li>
+      </ul>
+    </div>
+
+  </main>
+</div>
+
+<script>
+  // Progress bar
+  window.addEventListener('scroll', () => {
+    const el = document.getElementById('progress');
+    const pct = window.scrollY / (document.body.scrollHeight - window.innerHeight) * 100;
+    el.style.width = pct + '%';
+  });
+
+  // Active nav link highlight
+  const sections = document.querySelectorAll('h2[id], h3[id]');
+  const navLinks = document.querySelectorAll('nav a');
+
+  const observer = new IntersectionObserver(entries => {
+    entries.forEach(entry => {
+      if (entry.isIntersecting) {
+        navLinks.forEach(a => a.classList.remove('active'));
+        const active = document.querySelector(`nav a[href="#${entry.target.id}"]`);
+        if (active) active.classList.add('active');
+      }
+    });
+  }, { rootMargin: '-20% 0px -75% 0px' });
+
+  sections.forEach(s => observer.observe(s));
+</script>
+</body>
+</html>
