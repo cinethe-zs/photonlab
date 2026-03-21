@@ -102,7 +102,7 @@ data class EditorUiState(
 // ── Export job ─────────────────────────────────────────────────────────────────
 
 private data class ExportJob(
-    val bitmap: DesktopBitmap,
+    val file: File,
     val state: EditState,
     val lut: LutFile?,
     val quality: Int,
@@ -148,13 +148,15 @@ class EditorViewModel {
                 val count = pendingExports.incrementAndGet()
                 _uiState.update { it.copy(pendingExportCount = count) }
                 runCatching {
-                    val processed = withContext(Dispatchers.Default) { pipeline.process(job.bitmap, job.state, job.lut, job.photoDate) }
-                    val file = DesktopSaveManager.saveJpeg(processed, job.quality)
+                    val rawImage = ImageIO.read(job.file) ?: error("Could not read ${job.file.name}")
+                    val bitmap = DesktopBitmap.fromBufferedImage(rawImage)
+                    if (bitmap.image !== rawImage) rawImage.flush()
+                    val processed = withContext(Dispatchers.Default) { pipeline.process(bitmap, job.state, job.lut, job.photoDate) }
+                    bitmap.recycle()
+                    val outFile = DesktopSaveManager.saveJpeg(processed, job.quality)
                     processed.recycle()
-                    job.bitmap.recycle()
-                    _uiState.update { it.copy(snackbarMessage = "Saved to ${file.path}") }
+                    _uiState.update { it.copy(snackbarMessage = "Saved to ${outFile.path}") }
                 }.onFailure { err ->
-                    job.bitmap.recycle()
                     _uiState.update { it.copy(snackbarMessage = "Export failed: ${err.message}") }
                 }
                 val remaining = pendingExports.decrementAndGet()
@@ -557,12 +559,12 @@ class EditorViewModel {
     // ── Export ────────────────────────────────────────────────────────────
 
     fun export() {
-        val src     = _uiState.value.sourceBitmap ?: return
+        val file    = batchFiles.getOrNull(batchIndex) ?: return
         val state   = _uiState.value.editState
         val lut     = _uiState.value.currentLut
         val quality = _uiState.value.jpegQuality
         val date    = _uiState.value.photoDate
-        exportChannel.trySend(ExportJob(src, state, lut, quality, date))
+        exportChannel.trySend(ExportJob(file, state, lut, quality, date))
         if (batchIndex < batchFiles.size - 1) {
             saveSnapshot()
             batchIndex++
@@ -598,9 +600,8 @@ class EditorViewModel {
                     )
                     else -> Pair(EditState(), null)
                 }
-                val rawImage = runCatching { ImageIO.read(file) }.getOrNull() ?: return@forEachIndexed
                 val photoDate = readExifDate(file)
-                exportChannel.trySend(ExportJob(DesktopBitmap.fromBufferedImage(rawImage), state, lut, quality, photoDate))
+                exportChannel.trySend(ExportJob(file, state, lut, quality, photoDate))
             }
         }
     }
