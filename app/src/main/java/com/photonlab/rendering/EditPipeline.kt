@@ -114,7 +114,7 @@ class EditPipeline @Inject constructor(
      */
     fun process(source: Bitmap, state: EditState, lut: LutFile?, date: java.util.Date = java.util.Date()): Bitmap {
         return try {
-            val preFrame = if (shouldUseTiling(source)) {
+            val preFrame = if (shouldUseTiling(source, state)) {
                 processUpToFrameTiled(source, state, lut, date)
             } else {
                 processUpToFrame(source, state, lut, date)
@@ -125,8 +125,12 @@ class EditPipeline @Inject constructor(
         }
     }
 
-    private fun shouldUseTiling(source: Bitmap): Boolean {
-        return source.width > 0 && source.height > 0 && source.width * source.height > LARGE_IMAGE_THRESHOLD
+    private fun shouldUseTiling(source: Bitmap, state: EditState): Boolean {
+        if (source.width <= 0 || source.height <= 0) return false
+        if (source.width * source.height <= LARGE_IMAGE_THRESHOLD) return false
+        if (state.rotation != 0) return false
+        if (state.fineRotation != 0f) return false
+        return true
     }
 
     /**
@@ -252,7 +256,7 @@ class EditPipeline @Inject constructor(
      */
     fun processAll(source: Bitmap, state: EditState, lut: LutFile?, date: java.util.Date = java.util.Date()): Pair<Bitmap, Bitmap> {
         return try {
-            val preFrame = if (shouldUseTiling(source)) {
+            val preFrame = if (shouldUseTiling(source, state)) {
                 processUpToFrameTiled(source, state, lut, date)
             } else {
                 processUpToFrame(source, state, lut, date)
