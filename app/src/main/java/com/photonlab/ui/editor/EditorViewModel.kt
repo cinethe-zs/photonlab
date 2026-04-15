@@ -31,6 +31,8 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import android.content.SharedPreferences
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.currentCoroutineContext
+import kotlinx.coroutines.isActive
 import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -179,6 +181,7 @@ class EditorViewModel @Inject constructor(
                 runCatching {
                     val processed = withContext(Dispatchers.Default) { pipeline.process(job.bitmap, job.state, job.lut, job.date) }
                     saveToMediaStore(processed, job.quality)
+                    processed.recycle()
                     _uiState.update { it.copy(snackbarMessage = "Saved") }
                 }.onFailure { err ->
                     _uiState.update { it.copy(snackbarMessage = "Export failed: ${err.message}") }
@@ -753,26 +756,27 @@ class EditorViewModel @Inject constructor(
         renderJob?.cancel()
         renderJob = viewModelScope.launch {
             val date = _uiState.value.photoDate ?: Date()
-            // Immediate quick render (512px)
-            // processAll() returns (framed, preFrame) in one pipeline run — preFrame is
-            // used as histogramBitmap so border pixels never contaminate the histogram.
+            val lut = _uiState.value.currentLut
+
             val quick = quickSourceBitmap
+            val src = previewSourceBitmap
+
             if (quick != null) {
-                val lut = _uiState.value.currentLut
                 val (q, histo) = withContext(Dispatchers.Default) {
                     pipeline.processAll(quick, state, lut, date)
                 }
                 _uiState.update { it.copy(previewBitmap = q, histogramBitmap = histo) }
             }
-            // Quality render (1280px) — immediate or debounced
+
             if (!immediate) delay(250)
-            val src = previewSourceBitmap ?: return@launch
-            val lut = _uiState.value.currentLut
+            if (src == null || !currentCoroutineContext().isActive) return@launch
+
             _uiState.update { it.copy(isProcessing = true) }
             val preview = withContext(Dispatchers.Default) { pipeline.process(src, state, lut, date) }
-            _uiState.update { it.copy(previewBitmap = preview, isProcessing = false) }
+            if (currentCoroutineContext().isActive) {
+                _uiState.update { it.copy(previewBitmap = preview, isProcessing = false) }
+            }
         }
-        // Always update the geometry-only preview (for hold-to-compare)
         scheduleGeomRender(state)
     }
 
@@ -791,7 +795,9 @@ class EditorViewModel @Inject constructor(
                 frameSizePct = state.frameSizePct,
             )
             val geom = withContext(Dispatchers.Default) { pipeline.process(src, geomState, null) }
-            _uiState.update { it.copy(originalGeomBitmap = geom) }
+            if (currentCoroutineContext().isActive) {
+                _uiState.update { it.copy(originalGeomBitmap = geom) }
+            }
         }
     }
 

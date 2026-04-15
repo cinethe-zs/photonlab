@@ -15,8 +15,10 @@ import dagger.hilt.android.qualifiers.ApplicationContext
 import javax.inject.Inject
 import javax.inject.Singleton
 import kotlin.math.abs
+import kotlin.math.ceil
 import kotlin.math.cos
 import kotlin.math.max
+import kotlin.math.min
 import kotlin.math.pow
 import kotlin.math.sin
 
@@ -31,20 +33,214 @@ import kotlin.math.sin
 class EditPipeline @Inject constructor(
     @ApplicationContext private val context: Context,
 ) {
-    // AGSL shader source — loaded once from raw resources
     private val agslSource: String by lazy {
         context.resources.openRawResource(R.raw.edit_shader).bufferedReader().use { it.readText() }
     }
 
+    private val intArrayPool = object {
+        private var pixels: IntArray? = null
+        private var temp: IntArray? = null
+        private var temp2: IntArray? = null
+        private var out: IntArray? = null
+        private var lastSize = 0
+        private val lock = Any()
+
+        fun getIntArrays(size: Int): Array<IntArray> {
+            if (size <= 0) return arrayOf(IntArray(1), IntArray(1), IntArray(1), IntArray(1))
+            synchronized(lock) {
+                if (size != lastSize) {
+                    pixels = null; temp = null; temp2 = null; out = null
+                    lastSize = size
+                }
+                val p = pixels ?: IntArray(size).also { pixels = it }
+                val t = temp ?: IntArray(size).also { temp = it }
+                val t2 = temp2 ?: IntArray(size).also { temp2 = it }
+                val o = out ?: IntArray(size).also { out = it }
+                return arrayOf(p, t, t2, o)
+            }
+        }
+
+        fun clear() {
+            synchronized(lock) {
+                pixels = null; temp = null; temp2 = null; out = null; lastSize = 0
+            }
+        }
+    }
+
+    private val floatArrayPool = object {
+        private var lumaG: FloatArray? = null
+        private var chromaG: FloatArray? = null
+        private var tempL: FloatArray? = null
+        private var tempC: FloatArray? = null
+        private var lastSize = 0
+        private val lock = Any()
+
+        fun getFloatArrays(size: Int): Array<FloatArray> {
+            if (size <= 0) return arrayOf(FloatArray(1), FloatArray(1), FloatArray(1), FloatArray(1))
+            synchronized(lock) {
+                if (size != lastSize) {
+                    lumaG = null; chromaG = null; tempL = null; tempC = null
+                    lastSize = size
+                }
+                val lg = lumaG ?: FloatArray(size).also { lumaG = it }
+                val cg = chromaG ?: FloatArray(size).also { chromaG = it }
+                val tl = tempL ?: FloatArray(size).also { tempL = it }
+                val tc = tempC ?: FloatArray(size).also { tempC = it }
+                return arrayOf(lg, cg, tl, tc)
+            }
+        }
+
+        fun clear() {
+            synchronized(lock) {
+                lumaG = null; chromaG = null; tempL = null; tempC = null; lastSize = 0
+            }
+        }
+    }
+
     // ── Public API ─────────────────────────────────────────────────────────────
+
+    companion object {
+        private const val TILE_HEIGHT_PIXELS = 256
+        private const val LARGE_IMAGE_THRESHOLD = 5 * 1024 * 1024
+    }
 
     /**
      * Full pipeline: rotation → tone → LUT → sharpening → noise → crop → frame.
      * Equivalent to [processUpToFrame] + [applyFrame].
+     *
+     * For images >5MP, uses tile-based processing to limit peak memory usage.
+     * Tiling processes the image in small horizontal strips, reducing the size of
+     * intermediate bitmaps in the processing pipeline.
      */
     fun process(source: Bitmap, state: EditState, lut: LutFile?, date: java.util.Date = java.util.Date()): Bitmap {
-        val preFrame = processUpToFrame(source, state, lut, date)
-        return if (state.frameEnabled) applyFrame(preFrame, state) else preFrame
+        return try {
+            val preFrame = if (shouldUseTiling(source)) {
+                processUpToFrameTiled(source, state, lut, date)
+            } else {
+                processUpToFrame(source, state, lut, date)
+            }
+            if (state.frameEnabled) applyFrame(preFrame, state) else preFrame
+        } catch (e: Throwable) {
+            source
+        }
+    }
+
+    private fun shouldUseTiling(source: Bitmap): Boolean {
+        return source.width > 0 && source.height > 0 && source.width * source.height > LARGE_IMAGE_THRESHOLD
+    }
+
+    /**
+     * Tile-based processing for large images. Processes the image in horizontal
+     * strips (256px height) to limit peak memory usage. Each tile goes through
+     * the pipeline except date imprint (applied once to full output).
+     */
+    private fun processUpToFrameTiled(source: Bitmap, state: EditState, lut: LutFile?, date: java.util.Date): Bitmap {
+        val totalHeight = source.height
+        val width = source.width
+
+        if (width <= 0 || totalHeight <= 0) return source
+
+        val numTiles = ceil(totalHeight.toFloat() / TILE_HEIGHT_PIXELS).toInt()
+        if (numTiles <= 0) return source
+
+        val output = try {
+            Bitmap.createBitmap(width, totalHeight, Bitmap.Config.ARGB_8888)
+        } catch (e: Throwable) {
+            return source
+        }
+
+        val tileBufferSize = width * TILE_HEIGHT_PIXELS
+        val arrays = intArrayPool.getIntArrays(tileBufferSize.coerceAtLeast(width))
+
+        try {
+            for (tileIndex in 0 until numTiles) {
+                val startY = tileIndex * TILE_HEIGHT_PIXELS
+                val endY = min(startY + TILE_HEIGHT_PIXELS, totalHeight)
+                val tileHeight = endY - startY
+
+                if (tileHeight <= 0) continue
+
+                val tile = Bitmap.createBitmap(source, 0, startY, width, tileHeight)
+                val processedTile = try {
+                    processUpToFrameNoDateImprint(tile, state, lut)
+                } catch (e: Throwable) {
+                    tile.recycle()
+                    output.recycle()
+                    throw e
+                }
+
+                try {
+                    val pixels = arrays[0]
+                    processedTile.getPixels(pixels, 0, processedTile.width, 0, 0, processedTile.width, tileHeight)
+                    output.setPixels(pixels, 0, processedTile.width, 0, startY, processedTile.width, tileHeight)
+                } catch (e: Throwable) {
+                    if (processedTile !== tile) processedTile.recycle()
+                    tile.recycle()
+                    output.recycle()
+                    throw e
+                }
+
+                if (processedTile !== tile) processedTile.recycle()
+                tile.recycle()
+            }
+
+            if (state.dateImprint.enabled) {
+                try {
+                    val result = DateImprintProcessor.burn(output, state.dateImprint, date, context)
+                    if (result !== output) output.recycle()
+                    return result
+                } catch (e: Throwable) {
+                    output.recycle()
+                    throw e
+                }
+            }
+        } catch (e: Throwable) {
+            output.recycle()
+            throw e
+        }
+
+        return output
+    }
+
+    /**
+     * Process pipeline without date imprint (used for tiled processing).
+     */
+    private fun processUpToFrameNoDateImprint(source: Bitmap, state: EditState, lut: LutFile?): Bitmap {
+        val toRecycle = mutableListOf<Bitmap>()
+        var result = source
+
+        try {
+            val rotated = applyRotation(result, state.rotation)
+            if (rotated !== source) { toRecycle.add(source); result = rotated }
+
+            val fineRotated = applyFineRotation(result, state.fineRotation)
+            if (fineRotated !== result) { toRecycle.add(result); result = fineRotated }
+
+            val toneAdj = applyTone(result, state)
+            if (toneAdj !== result) { toRecycle.add(result); result = toneAdj }
+
+            val lutApplied = if (lut != null) {
+                val r = applyLut(result, lut)
+                if (r !== result) { toRecycle.add(result); r } else result
+            } else result
+
+            val sharpened = if (state.sharpening > 0f) {
+                val r = applySharpening(lutApplied, state.sharpening)
+                if (r !== lutApplied) { toRecycle.add(lutApplied); r } else lutApplied
+            } else lutApplied
+
+            val noised = if (state.noise != 0f) {
+                val r = applyNoise(sharpened, state.noise)
+                if (r !== sharpened) { toRecycle.add(sharpened); r } else sharpened
+            } else sharpened
+
+            val cropped = applyCrop(noised, state)
+            if (cropped !== noised) { toRecycle.add(noised); }
+            return cropped
+        } catch (e: Throwable) {
+            toRecycle.forEach { it.recycle() }
+            throw e
+        }
     }
 
     /**
@@ -55,9 +251,17 @@ class EditPipeline @Inject constructor(
      * When [EditState.frameEnabled] is false both elements of the pair are the same object.
      */
     fun processAll(source: Bitmap, state: EditState, lut: LutFile?, date: java.util.Date = java.util.Date()): Pair<Bitmap, Bitmap> {
-        val preFrame = processUpToFrame(source, state, lut, date)
-        return if (state.frameEnabled) Pair(applyFrame(preFrame, state), preFrame)
-               else Pair(preFrame, preFrame)
+        return try {
+            val preFrame = if (shouldUseTiling(source)) {
+                processUpToFrameTiled(source, state, lut, date)
+            } else {
+                processUpToFrame(source, state, lut, date)
+            }
+            if (state.frameEnabled) Pair(applyFrame(preFrame, state), preFrame)
+            else Pair(preFrame, preFrame)
+        } catch (e: Throwable) {
+            Pair(source, source)
+        }
     }
 
     /**
@@ -65,16 +269,46 @@ class EditPipeline @Inject constructor(
      * the unframed result (e.g. for histogram computation).
      */
     fun processUpToFrame(source: Bitmap, state: EditState, lut: LutFile?, date: java.util.Date = java.util.Date()): Bitmap {
-        val rotated     = applyRotation(source, state.rotation)
-        val fineRotated = applyFineRotation(rotated, state.fineRotation)
-        val imprinted   = if (state.dateImprint.enabled)
-            DateImprintProcessor.burn(fineRotated, state.dateImprint, date, context)
-        else fineRotated
-        val toneAdj     = applyTone(imprinted, state)
-        val lutApplied  = if (lut != null) applyLut(toneAdj, lut) else toneAdj
-        val sharpened   = if (state.sharpening > 0f) applySharpening(lutApplied, state.sharpening) else lutApplied
-        val noised      = if (state.noise != 0f) applyNoise(sharpened, state.noise) else sharpened
-        return applyCrop(noised, state)
+        val toRecycle = mutableListOf<Bitmap>()
+        var result = source
+
+        try {
+            val rotated = applyRotation(result, state.rotation)
+            if (rotated !== source) { toRecycle.add(source); result = rotated }
+
+            val fineRotated = applyFineRotation(result, state.fineRotation)
+            if (fineRotated !== result) { toRecycle.add(result); result = fineRotated }
+
+            val imprinted = if (state.dateImprint.enabled)
+                DateImprintProcessor.burn(result, state.dateImprint, date, context)
+            else result
+            if (state.dateImprint.enabled && imprinted !== result) { toRecycle.add(result); result = imprinted }
+
+            val toneAdj = applyTone(result, state)
+            if (toneAdj !== result) { toRecycle.add(result); result = toneAdj }
+
+            val lutApplied = if (lut != null) {
+                val r = applyLut(result, lut)
+                if (r !== result) { toRecycle.add(result); r } else result
+            } else result
+
+            val sharpened = if (state.sharpening > 0f) {
+                val r = applySharpening(lutApplied, state.sharpening)
+                if (r !== lutApplied) { toRecycle.add(lutApplied); r } else lutApplied
+            } else lutApplied
+
+            val noised = if (state.noise != 0f) {
+                val r = applyNoise(sharpened, state.noise)
+                if (r !== sharpened) { toRecycle.add(sharpened); r } else sharpened
+            } else sharpened
+
+            val cropped = applyCrop(noised, state)
+            if (cropped !== noised) { toRecycle.add(noised); }
+            return cropped
+        } catch (e: Throwable) {
+            toRecycle.forEach { it.recycle() }
+            throw e
+        }
     }
 
     // ── Rotation ───────────────────────────────────────────────────────────────
@@ -302,15 +536,16 @@ class EditPipeline @Inject constructor(
     private fun applySharpening(src: Bitmap, strength: Float): Bitmap {
         val w = src.width
         val h = src.height
-        val pixels = IntArray(w * h)
+        val n = w * h
+
+        val arrays = intArrayPool.getIntArrays(n)
+        val pixels = arrays[0]
+        val temp = arrays[1]
+        val blurred = arrays[2]
+        val out = arrays[3]
+
         src.getPixels(pixels, 0, w, 0, 0, w, h)
 
-        // Separable box blur: horizontal pass → temp, then vertical pass → blurred
-        // 6 reads/pixel total vs 9 for a 2D 3×3 kernel
-        val temp    = IntArray(w * h)
-        val blurred = IntArray(w * h)
-
-        // Horizontal pass
         for (y in 0 until h) {
             for (x in 0 until w) {
                 val x0 = maxOf(0, x - 1); val x1 = minOf(w - 1, x + 1)
@@ -325,7 +560,6 @@ class EditPipeline @Inject constructor(
             }
         }
 
-        // Vertical pass
         for (y in 0 until h) {
             for (x in 0 until w) {
                 val y0 = maxOf(0, y - 1); val y1 = minOf(h - 1, y + 1)
@@ -340,17 +574,15 @@ class EditPipeline @Inject constructor(
             }
         }
 
-        // USM: out = original + factor * (original - blur)
         val factor = strength / 100f * 1.5f
-        val out = IntArray(w * h)
-        for (i in pixels.indices) {
+        for (i in 0 until n) {
             val a   = (pixels[i] ushr 24) and 0xFF
             val or_ = (pixels[i] shr 16)  and 0xFF
             val og  = (pixels[i] shr  8)  and 0xFF
             val ob  =  pixels[i]           and 0xFF
-            val br  = (blurred[i] shr 16) and 0xFF
-            val bg  = (blurred[i] shr  8) and 0xFF
-            val bb  =  blurred[i]          and 0xFF
+            val br = (blurred[i] shr 16) and 0xFF
+            val bg = (blurred[i] shr  8) and 0xFF
+            val bb =  blurred[i]          and 0xFF
             out[i] = (a shl 24) or
                 ((or_ + (factor * (or_ - br)).toInt()).coerceIn(0, 255) shl 16) or
                 ((og  + (factor * (og  - bg)).toInt()).coerceIn(0, 255) shl  8) or
@@ -370,14 +602,18 @@ class EditPipeline @Inject constructor(
      */
     private fun applyNoise(src: Bitmap, noise: Float): Bitmap {
         val w = src.width; val h = src.height
-        val pixels = IntArray(w * h)
-        src.getPixels(pixels, 0, w, 0, 0, w, h)
+        val n = w * h
 
         if (noise < 0f) {
-            // Denoise: blend original with separable box blur
+            val arrays = intArrayPool.getIntArrays(n)
+            val pixels = arrays[0]
+            val temp = arrays[1]
+            val blur = arrays[2]
+            val out = arrays[3]
+
+            src.getPixels(pixels, 0, w, 0, 0, w, h)
+
             val factor = (-noise / 100f).coerceIn(0f, 1f)
-            val temp   = IntArray(w * h)
-            val blur   = IntArray(w * h)
 
             for (y in 0 until h) {
                 for (x in 0 until w) {
@@ -403,8 +639,7 @@ class EditPipeline @Inject constructor(
                 }
             }
 
-            val out = IntArray(w * h)
-            for (i in pixels.indices) {
+            for (i in 0 until n) {
                 val orig = pixels[i]
                 val a    = (orig ushr 24) and 0xFF
                 val or_  = (orig shr 16) and 0xFF
@@ -456,42 +691,37 @@ class EditPipeline @Inject constructor(
         val w = src.width
         val h = src.height
         val n = w * h
-        val pixels = IntArray(n)
+
+        val intArrays = intArrayPool.getIntArrays(n)
+        val floatArrays = floatArrayPool.getFloatArrays(n)
+        val pixels = intArrays[0]
+        val lumaG = floatArrays[0]
+        val chromaG = floatArrays[1]
+        val tempL = floatArrays[2]
+        val tempC = floatArrays[3]
+
         src.getPixels(pixels, 0, w, 0, 0, w, h)
 
         val amp = strength / 100f
-        // Peak grain amplitude (0..255 scale).
-        // 100 % → ~16 counts σ at midtones ≈ pushed ISO 3200 / Tri-X character.
         val grainAmp = amp * 16f
-        // Blob radius: 1 px (fine) at low strength → 2 px (coarse) at high.
         val blurR = if (amp < 0.5f) 1 else 2
         val blurD = (2 * blurR + 1).toFloat()
 
-        // Deterministic seeds — stable grain across same-size renders.
         var xs1 = (w.toLong() * 1664525L xor h.toLong() * 22695477L xor 0x3141592653589793L) or 1L
         var xs2 = (xs1 * 6364136223846793005L + 1442695040888963407L) or 1L
 
-        // Xorshift64 — several times faster than java.util.Random.
         fun rng1(): Long { xs1 = xs1 xor (xs1 shl 13); xs1 = xs1 xor (xs1 ushr 7); xs1 = xs1 xor (xs1 shl 17); return xs1 }
         fun rng2(): Long { xs2 = xs2 xor (xs2 shl 7); xs2 = xs2 xor (xs2 ushr 9); xs2 = xs2 xor (xs2 shl 8); return xs2 }
-        // Map to float in [-1, 1]
         fun f1() = (rng1() and 0xFFFFFFL).toFloat() / 0x800000.toFloat() - 1f
         fun f2() = (rng2() and 0xFFFFFFL).toFloat() / 0x800000.toFloat() - 1f
-        // Approximate N(0,1) via sum of three uniforms (central limit theorem).
         fun gauss1() = (f1() + f1() + f1()) * 0.5774f
         fun gauss2() = (f2() + f2() + f2()) * 0.5774f
 
-        // --- Generate two independent grain fields ---
-        // lumaG  : drives equal shift on all three channels (structure / density)
-        // chromaG: drives R↑B↓ or R↓B↑ perturbation (color-layer independence)
-        val lumaG   = FloatArray(n) { gauss1() }
-        val chromaG = FloatArray(n) { gauss2() * 0.35f }   // chroma ≈ 35% of luma amplitude
+        for (i in 0 until n) {
+            lumaG[i] = gauss1()
+            chromaG[i] = gauss2() * 0.35f
+        }
 
-        // --- Separable box-blur → spatial coherence (grain blob size) ---
-        val tempL = FloatArray(n)
-        val tempC = FloatArray(n)
-
-        // Horizontal pass
         for (y in 0 until h) {
             for (x in 0 until w) {
                 val x0 = maxOf(0, x - blurR); val x1 = minOf(w - 1, x + blurR)
@@ -501,7 +731,6 @@ class EditPipeline @Inject constructor(
                 tempL[y * w + x] = sL / cnt; tempC[y * w + x] = sC / cnt
             }
         }
-        // Vertical pass
         for (y in 0 until h) {
             for (x in 0 until w) {
                 val y0 = maxOf(0, y - blurR); val y1 = minOf(h - 1, y + blurR)
@@ -511,11 +740,8 @@ class EditPipeline @Inject constructor(
                 lumaG[y * w + x] = sL / cnt; chromaG[y * w + x] = sC / cnt
             }
         }
-        // blurD² factor restores variance lost during the 2-D blur so that amplitude
-        // is consistent regardless of the chosen blob radius.
 
-        // --- Apply grain with luminance masking ---
-        for (i in pixels.indices) {
+        for (i in 0 until n) {
             val px = pixels[i]
             val a  = (px ushr 24) and 0xFF
             val ri = (px shr 16) and 0xFF
@@ -524,23 +750,16 @@ class EditPipeline @Inject constructor(
 
             val lum = (0.2126f * ri + 0.7152f * gi + 0.0722f * bi) / 255f
 
-            // Luminance mask: smooth bell peaking in the midtones.
-            // Shadows and highlights retain a 10% floor (base fog / residual structure).
             val l = lum.coerceIn(0f, 1f)
             val lumMask = if (l < 0.5f) {
-                val t = l * 2f;         0.1f + t * (2f - t) * 0.9f   // ease-in 0→1 over shadows→mid
+                val t = l * 2f;         0.1f + t * (2f - t) * 0.9f
             } else {
-                val t = (l - 0.5f) * 2f; 0.1f + (1f - t * t) * 0.9f  // quadratic rolloff over mid→highlights
+                val t = (l - 0.5f) * 2f; 0.1f + (1f - t * t) * 0.9f
             }
 
-            // Scale grain: blurD² restores blur-reduced variance, grainAmp sets overall level.
             val gL = lumaG[i]   * blurD * blurD * grainAmp * lumMask
             val gC = chromaG[i] * blurD * blurD * grainAmp * lumMask
 
-            // Per-channel application:
-            //   R layer: luma + chroma push (R-sensitive layer, more variation)
-            //   G layer: luma only          (finest grain, closest to luma)
-            //   B layer: luma − chroma push (B-sensitive layer, complementary shift)
             val dR = (gL + gC * 0.7f).toInt()
             val dG =  gL.toInt()
             val dB = (gL - gC * 0.7f).toInt()
