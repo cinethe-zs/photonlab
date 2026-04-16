@@ -206,46 +206,52 @@ class EditPipeline @Inject constructor(
         return output
     }
 
-    /**
-     * Process pipeline without date imprint (used for tiled processing).
-     */
-private fun processUpToFrameNoDateImprint(source: Bitmap, state: EditState, lut: LutFile?): Bitmap {
+/**
+   * Process pipeline without date imprint (used for tiled processing).
+   */
+  private fun processUpToFrameNoDateImprint(source: Bitmap, state: EditState, lut: LutFile?): Bitmap {
     val toRecycle = mutableListOf<Bitmap>()
+    var prev = source
     var result = source
-
     try {
-        val rotated = applyRotation(result, state.rotation)
-        if (rotated !== source) { result = rotated }
+      val rotated = applyRotation(source, state.rotation)
+      if (rotated !== source) { toRecycle.add(source); result = rotated }
+      prev = result
 
-            val fineRotated = applyFineRotation(result, state.fineRotation)
-            if (fineRotated !== result) { toRecycle.add(result); result = fineRotated }
+      val fineRotated = applyFineRotation(prev, state.fineRotation)
+      if (fineRotated !== prev) { toRecycle.add(prev); result = fineRotated }
+      prev = result
 
-            val toneAdj = applyTone(result, state)
-            if (toneAdj !== result) { toRecycle.add(result); result = toneAdj }
+      val toneAdj = applyTone(prev, state)
+      if (toneAdj !== prev) { toRecycle.add(prev); result = toneAdj }
+      prev = result
 
-            val lutApplied = if (lut != null) {
-                val r = applyLut(result, lut)
-                if (r !== result) { toRecycle.add(result); r } else result
-            } else result
+      val lutApplied = if (lut != null) {
+        val r = applyLut(prev, lut)
+        if (r !== prev) { toRecycle.add(prev); r } else prev
+      } else prev
+      prev = lutApplied
 
-            val sharpened = if (state.sharpening > 0f) {
-                val r = applySharpening(lutApplied, state.sharpening)
-                if (r !== lutApplied) { toRecycle.add(lutApplied); r } else lutApplied
-            } else lutApplied
+      val sharpened = if (state.sharpening > 0f) {
+        val r = applySharpening(prev, state.sharpening)
+        if (r !== prev) { toRecycle.add(prev); r } else prev
+      } else prev
+      prev = sharpened
 
-            val noised = if (state.noise != 0f) {
-                val r = applyNoise(sharpened, state.noise)
-                if (r !== sharpened) { toRecycle.add(sharpened); r } else sharpened
-            } else sharpened
+      val noised = if (state.noise != 0f) {
+        val r = applyNoise(prev, state.noise)
+        if (r !== prev) { toRecycle.add(prev); r } else prev
+      } else prev
+      prev = noised
 
-            val cropped = applyCrop(noised, state)
-            if (cropped !== noised) { toRecycle.add(noised); }
-            return cropped
-        } catch (e: Throwable) {
-            toRecycle.forEach { it.recycle() }
-            throw e
-        }
+      val cropped = applyCrop(prev, state)
+      if (cropped !== prev) { toRecycle.add(prev) }
+      return cropped
+    } catch (e: Throwable) {
+      toRecycle.forEach { it.recycle() }
+      throw e
     }
+  }
 
     /**
      * Runs the full pipeline and returns both the final result and the pre-frame bitmap
@@ -268,52 +274,59 @@ private fun processUpToFrameNoDateImprint(source: Bitmap, state: EditState, lut:
         }
     }
 
-    /**
-     * Runs all pipeline steps except the frame border. Useful when the caller needs
-     * the unframed result (e.g. for histogram computation).
-     */
+/**
+ * Runs all pipeline steps except the frame border. Useful when the caller needs
+ * the unframed result (e.g. for histogram computation).
+ */
 fun processUpToFrame(source: Bitmap, state: EditState, lut: LutFile?, date: java.util.Date = java.util.Date()): Bitmap {
-    val toRecycle = mutableListOf<Bitmap>()
-    var result = source
+  val toRecycle = mutableListOf<Bitmap>()
+  var prev = source
+  var result = source
+  try {
+    val rotated = applyRotation(source, state.rotation)
+    if (rotated !== source) { toRecycle.add(source); result = rotated }
+    prev = result
 
-    try {
-        val rotated = applyRotation(result, state.rotation)
-        if (rotated !== source) { result = rotated }
+    val fineRotated = applyFineRotation(prev, state.fineRotation)
+    if (fineRotated !== prev) { toRecycle.add(prev); result = fineRotated }
+    prev = result
 
-            val fineRotated = applyFineRotation(result, state.fineRotation)
-            if (fineRotated !== result) { toRecycle.add(result); result = fineRotated }
+    val imprinted = if (state.dateImprint.enabled) {
+      val r = DateImprintProcessor.burn(prev, state.dateImprint, date, context)
+      if (r !== prev) { toRecycle.add(prev); r } else prev
+    } else prev
+    prev = imprinted
 
-            val imprinted = if (state.dateImprint.enabled)
-                DateImprintProcessor.burn(result, state.dateImprint, date, context)
-            else result
-            if (state.dateImprint.enabled && imprinted !== result) { toRecycle.add(result); result = imprinted }
+    val toneAdj = applyTone(prev, state)
+    if (toneAdj !== prev) { toRecycle.add(prev); result = toneAdj }
+    prev = result
 
-            val toneAdj = applyTone(result, state)
-            if (toneAdj !== result) { toRecycle.add(result); result = toneAdj }
+    val lutApplied = if (lut != null) {
+      val r = applyLut(prev, lut)
+      if (r !== prev) { toRecycle.add(prev); r } else prev
+    } else prev
+    prev = lutApplied
 
-            val lutApplied = if (lut != null) {
-                val r = applyLut(result, lut)
-                if (r !== result) { toRecycle.add(result); r } else result
-            } else result
+    val sharpened = if (state.sharpening > 0f) {
+      val r = applySharpening(prev, state.sharpening)
+      if (r !== prev) { toRecycle.add(prev); r } else prev
+    } else prev
+    prev = sharpened
 
-            val sharpened = if (state.sharpening > 0f) {
-                val r = applySharpening(lutApplied, state.sharpening)
-                if (r !== lutApplied) { toRecycle.add(lutApplied); r } else lutApplied
-            } else lutApplied
+    val noised = if (state.noise != 0f) {
+      val r = applyNoise(prev, state.noise)
+      if (r !== prev) { toRecycle.add(prev); r } else prev
+    } else prev
+    prev = noised
 
-            val noised = if (state.noise != 0f) {
-                val r = applyNoise(sharpened, state.noise)
-                if (r !== sharpened) { toRecycle.add(sharpened); r } else sharpened
-            } else sharpened
-
-            val cropped = applyCrop(noised, state)
-            if (cropped !== noised) { toRecycle.add(noised); }
-            return cropped
-        } catch (e: Throwable) {
-            toRecycle.forEach { it.recycle() }
-            throw e
-        }
-    }
+    val cropped = applyCrop(prev, state)
+    if (cropped !== prev) { toRecycle.add(prev) }
+    return cropped
+  } catch (e: Throwable) {
+    toRecycle.forEach { it.recycle() }
+    throw e
+  }
+}
 
     // ── Rotation ───────────────────────────────────────────────────────────────
 
