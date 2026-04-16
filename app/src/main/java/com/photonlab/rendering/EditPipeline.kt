@@ -144,18 +144,33 @@ private fun shouldUseTiling(source: Bitmap, state: EditState): Boolean {
 		val croppedSource = if (state.cropRect != null) applyCrop(source, state) else source
 		val toRecycleCrop = if (state.cropRect != null) source else null
 
-		// Apply rotation FIRST if enabled - creates one intermediate bitmap
-		// This is the key fix: instead of applying rotation to each tile (which would
-		// cause many intermediate bitmaps), we apply it once before tiling.
-		val rotatedSource = if (state.rotation != 0 || state.fineRotation != 0f) {
-			val r1 = if (state.rotation != 0) applyRotation(croppedSource, state.rotation) else croppedSource
-			val r2 = if (state.fineRotation != 0f) applyFineRotation(r1, state.fineRotation) else r1
-			// Recycle intermediate if different from originals
-			if (r1 !== croppedSource && croppedSource !== source) croppedSource.recycle()
-			if (r2 !== r1) r1.recycle()
-			r2
-		} else croppedSource
-		val toRecycleSource = if (rotatedSource !== croppedSource) croppedSource else null
+// Apply rotation FIRST if enabled - creates one intermediate bitmap
+    // This is the key fix: instead of applying rotation to each tile (which would
+    // cause many intermediate bitmaps), we apply it once before tiling.
+    val rotatedSource: Bitmap
+    val toRecycleSource: Bitmap?
+    if (state.rotation != 0 || state.fineRotation != 0f) {
+        val r1 = if (state.rotation != 0) applyRotation(croppedSource, state.rotation) else croppedSource
+        val r2 = if (state.fineRotation != 0f) applyFineRotation(r1, state.fineRotation) else r1
+        // Track intermediates for recycling: r1 came from croppedSource, r2 came from r1
+        val toRecycleR1 = if (r1 !== croppedSource) croppedSource else null
+        val toRecycleR2 = if (r2 !== r1) r1 else null
+        // r2 is the final rotated result
+        rotatedSource = r2
+        // r1 must be recycled after r2 is used (r2 might be r1, so only recycle if different)
+        toRecycleSource = toRecycleR2 ?: toRecycleR1
+        // Recycle intermediates after r2 is captured - only if they're different objects
+        if (r2 !== r1 && r1 !== croppedSource) {
+            r1.recycle()
+        }
+        if (r2 === r1 && r1 !== croppedSource) {
+            // r1 was created but r2 is the same object (fineRotation was 0)
+            croppedSource.recycle()
+        }
+    } else {
+        rotatedSource = croppedSource
+        toRecycleSource = null
+    }
 
 		// Now rotatedSource is what we tile
 		val totalHeight = rotatedSource.height
@@ -196,9 +211,10 @@ private fun shouldUseTiling(source: Bitmap, state: EditState): Boolean {
 
 				// Tiles are created from rotated source, so coordinates are valid
 				val tile = Bitmap.createBitmap(rotatedSource, 0, startY, width, tileHeight)
-				val processedTile = try {
-					// Process tile WITHOUT applying crop/rotation (already applied to rotatedSource)
-					processUpToFrameNoDateImprintNoCrop(tile, state, lut)
+val processedTile = try {
+                // Process tile WITHOUT applying crop/rotation (already applied to rotatedSource)
+                // Pass rotation=0 and fineRotation=0f since rotation was already applied to full image
+                processUpToFrameNoDateImprintNoCrop(tile, state.copy(rotation = 0, fineRotation = 0f, cropRect = null), lut)
 				} catch (e: Throwable) {
 					tile.recycle()
 					output.recycle()
