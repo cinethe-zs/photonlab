@@ -237,9 +237,11 @@ class EditPipeline @Inject constructor(
             }
             if (state.frameEnabled) Pair(applyFrame(preFrame, state), preFrame)
             else Pair(preFrame, preFrame)
-        } catch (e: Throwable) {
-            Pair(source, source)
-        }
+} catch (e: Throwable) {
+        // Return a safe fallback - create a copy of source to avoid recycled bitmap issues
+        val fallback = source.copy(Bitmap.Config.ARGB_8888, true)
+        Pair(fallback, fallback)
+    }
     }
 
 /**
@@ -292,7 +294,8 @@ val toneAdj = applyTone(prev, state)
     // even when applyTone returns the original source (early return when all sliders are 0)
     val final = if (state.dateImprint.enabled) {
         val r = DateImprintProcessor.burn(prev, state.dateImprint, date, context)
-        if (r !== prev) { toRecycle.add(prev); r } else prev
+        if (r !== prev) { toRecycle.add(prev); result = r }
+        r
     } else prev
     return final
   } catch (e: Throwable) {
