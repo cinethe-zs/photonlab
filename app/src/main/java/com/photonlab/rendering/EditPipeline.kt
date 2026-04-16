@@ -112,18 +112,14 @@ class EditPipeline @Inject constructor(
      * Tiling processes the image in small horizontal strips, reducing the size of
      * intermediate bitmaps in the processing pipeline.
      */
-    fun process(source: Bitmap, state: EditState, lut: LutFile?, date: java.util.Date = java.util.Date()): Bitmap {
-        return try {
-            val preFrame = if (shouldUseTiling(source, state)) {
-                processUpToFrameTiled(source, state, lut, date)
-            } else {
-                processUpToFrame(source, state, lut, date)
-            }
-            if (state.frameEnabled) applyFrame(preFrame, state) else preFrame
-        } catch (e: Throwable) {
-            source
-        }
-    }
+fun process(source: Bitmap, state: EditState, lut: LutFile?, date: java.util.Date = java.util.Date()): Bitmap {
+ val preFrame = if (shouldUseTiling(source, state)) {
+ processUpToFrameTiled(source, state, lut, date)
+ } else {
+ processUpToFrame(source, state, lut, date)
+ }
+ return if (state.frameEnabled) applyFrame(preFrame, state) else preFrame
+ }
 
     private fun shouldUseTiling(source: Bitmap, state: EditState): Boolean {
         if (source.width <= 0 || source.height <= 0) return false
