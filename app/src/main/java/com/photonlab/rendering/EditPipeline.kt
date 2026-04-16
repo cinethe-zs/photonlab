@@ -129,20 +129,32 @@ private fun shouldUseTiling(source: Bitmap, state: EditState): Boolean {
 	}
 
 /**
-	 * Tile-based processing for large images. Processes the image in horizontal
-	 * strips (256px height) to limit peak memory usage. Each tile goes through
-	 * the pipeline except date imprint (applied once to full output).
-	 *
-	 * For rotated images, rotation is applied BEFORE tiling to create a single
-	 * intermediate rotated bitmap, then tiling operates on that rotated image.
-	 * This limits memory usage even for large rotated images.
-	 */
-	private fun processUpToFrameTiled(source: Bitmap, state: EditState, lut: LutFile?, date: java.util.Date): Bitmap {
-// Apply crop FIRST so tile calculations use cropped dimensions.
+ * Tile-based processing for large images. Processes the image in horizontal
+ * strips (256px height) to limit peak memory usage. Each tile goes through
+ * the pipeline except date imprint (applied once to full output).
+ *
+ * For rotated images, rotation is applied BEFORE tiling to create a single
+ * intermediate rotated bitmap, then tiling operates on that rotated image.
+ * This limits memory usage even for large rotated images.
+ */
+private fun processUpToFrameTiled(source: Bitmap, state: EditState, lut: LutFile?, date: java.util.Date): Bitmap {
+    // BUG FIX: cropRect is in normalized (0-1) coords for the ORIGINAL image.
+    // After 90°/270° rotation, dimensions are swapped so we must transform
+    // cropRect BEFORE applying crop. Otherwise the same normalized coords map
+    // to a different area. E.g. 90° clockwise: left→top, top→right, dims swap.
+    val effectiveRotation = if (state.fineRotation != 0f) 0 else state.rotation
+    val cropRectForRotation = if (effectiveRotation != 0 && state.cropRect != null) {
+        transformCropRectForRotation(state.cropRect, effectiveRotation)
+    } else state.cropRect
+
+    // Build a state with the (possibly transformed) cropRect for applyCrop
+    val stateForCrop = if (cropRectForRotation != null) state.copy(cropRect = cropRectForRotation) else state
+
+    // Apply crop FIRST so tile calculations use cropped dimensions.
     // This avoids tile coordinates extending beyond bitmap bounds when crop reduces size.
     // Example: source=4000x3000, crop to 2000x1500. Tiling must be based on 1500 height, not 3000.
-    val croppedSource = if (state.cropRect != null) applyCrop(source, state) else source
-    val toRecycleCrop = if (state.cropRect != null) source else null
+    val croppedSource = if (cropRectForRotation != null) applyCrop(source, stateForCrop) else source
+    val toRecycleCrop = if (cropRectForRotation != null) source else null
 
     // Apply rotation FIRST if enabled - creates one intermediate bitmap.
     // Recycle intermediates IMMEDIATELY when replaced to avoid complex deferred-cleanup logic.
@@ -879,7 +891,46 @@ private fun applyTone(src: Bitmap, state: EditState): Bitmap {
 
     // ── Crop ──────────────────────────────────────────────────────────────────
 
-    private fun applyCrop(src: Bitmap, state: EditState): Bitmap {
+/**
+ * Transforms a [NormalizedRect] from original image coordinates to rotated
+ * image coordinates. cropRect is in 0-1 normalized coords for the ORIGINAL image;
+ * after 90°/270° rotation dimensions swap, so we must remap the rect.
+ * NormalizedRect uses (left, top, right, bottom) — NOT width/height.
+ *
+ * After 90° CW rotation: newX = h - 1 - y, newY = x (in original pixel coords).
+ * After 180°: newX = w - 1 - x, newY = h - 1 - y.
+ * After 270° CW (= 90° CCW): newX = y, newY = w - 1 - x.
+ */
+private fun transformCropRectForRotation(cropRect: com.photonlab.domain.model.NormalizedRect, rotation: Int): com.photonlab.domain.model.NormalizedRect {
+    val origLeft = cropRect.left
+    val origTop = cropRect.top
+    val origRight = cropRect.right
+    val origBottom = cropRect.bottom
+
+    return when (rotation) {
+        90 -> com.photonlab.domain.model.NormalizedRect(
+            left = 1f - origBottom,  // original bottom → left
+            top = origLeft,           // original left → top
+            right = 1f - origTop,    // original top → right
+            bottom = origRight        // original right → bottom
+        )
+        180 -> com.photonlab.domain.model.NormalizedRect(
+            left = 1f - origRight,
+            top = 1f - origBottom,
+            right = 1f - origLeft,
+            bottom = 1f - origTop
+        )
+        270 -> com.photonlab.domain.model.NormalizedRect(
+            left = origTop,           // original top → left
+            top = 1f - origRight,    // original right → top
+            right = origBottom,       // original bottom → right
+            bottom = 1f - origLeft   // original left → bottom
+        )
+else -> cropRect
+    }
+}
+
+private fun applyCrop(src: Bitmap, state: EditState): Bitmap {
         val rect = state.cropRect ?: return src
         val x = (rect.left   * src.width ).toInt().coerceIn(0, src.width  - 1)
         val y = (rect.top    * src.height).toInt().coerceIn(0, src.height - 1)
