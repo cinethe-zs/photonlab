@@ -207,51 +207,19 @@ class EditPipeline @Inject constructor(
     }
 
 /**
-   * Process pipeline without date imprint (used for tiled processing).
-   */
-  private fun processUpToFrameNoDateImprint(source: Bitmap, state: EditState, lut: LutFile?): Bitmap {
-    val toRecycle = mutableListOf<Bitmap>()
-    var prev = source
-    var result = source
-    try {
-      val rotated = applyRotation(source, state.rotation)
-      if (rotated !== source) { toRecycle.add(source); result = rotated }
-      prev = result
-
-      val fineRotated = applyFineRotation(prev, state.fineRotation)
-      if (fineRotated !== prev) { toRecycle.add(prev); result = fineRotated }
-      prev = result
-
-      val toneAdj = applyTone(prev, state)
-      if (toneAdj !== prev) { toRecycle.add(prev); result = toneAdj }
-      prev = result
-
-      val lutApplied = if (lut != null) {
-        val r = applyLut(prev, lut)
-        if (r !== prev) { toRecycle.add(prev); r } else prev
-      } else prev
-      prev = lutApplied
-
-      val sharpened = if (state.sharpening > 0f) {
-        val r = applySharpening(prev, state.sharpening)
-        if (r !== prev) { toRecycle.add(prev); r } else prev
-      } else prev
-      prev = sharpened
-
-      val noised = if (state.noise != 0f) {
-        val r = applyNoise(prev, state.noise)
-        if (r !== prev) { toRecycle.add(prev); r } else prev
-      } else prev
-      prev = noised
-
-      val cropped = applyCrop(prev, state)
-      if (cropped !== prev) { toRecycle.add(prev) }
-      return cropped
-    } catch (e: Throwable) {
-      toRecycle.forEach { it.recycle() }
-      throw e
+     * Process pipeline without date imprint (used for tiled processing).
+     * Note: Does not recycle any intermediate bitmaps - the caller (processUpToFrameTiled)
+     * handles recycling the original tile. For small 256px tiles the memory overhead is acceptable.
+     */
+    private fun processUpToFrameNoDateImprint(source: Bitmap, state: EditState, lut: LutFile?): Bitmap {
+        var result = applyRotation(source, state.rotation)
+        result = applyFineRotation(result, state.fineRotation)
+        result = applyTone(result, state)
+        result = if (lut != null) applyLut(result, lut) else result
+        result = if (state.sharpening > 0f) applySharpening(result, state.sharpening) else result
+        result = if (state.noise != 0f) applyNoise(result, state.noise) else result
+        return applyCrop(result, state)
     }
-  }
 
     /**
      * Runs the full pipeline and returns both the final result and the pre-frame bitmap
@@ -291,37 +259,42 @@ fun processUpToFrame(source: Bitmap, state: EditState, lut: LutFile?, date: java
     if (fineRotated !== prev) { toRecycle.add(prev); result = fineRotated }
     prev = result
 
-    val imprinted = if (state.dateImprint.enabled) {
-      val r = DateImprintProcessor.burn(prev, state.dateImprint, date, context)
-      if (r !== prev) { toRecycle.add(prev); r } else prev
-    } else prev
-    prev = imprinted
-
-    val toneAdj = applyTone(prev, state)
+val toneAdj = applyTone(prev, state)
     if (toneAdj !== prev) { toRecycle.add(prev); result = toneAdj }
     prev = result
 
-    val lutApplied = if (lut != null) {
-      val r = applyLut(prev, lut)
-      if (r !== prev) { toRecycle.add(prev); r } else prev
-    } else prev
-    prev = lutApplied
+    val lutResult = if (lut != null) {
+        val r = applyLut(prev, lut)
+        if (r !== prev) { toRecycle.add(prev); result = r }
+        r
+    } else result
+    prev = lutResult
 
     val sharpened = if (state.sharpening > 0f) {
-      val r = applySharpening(prev, state.sharpening)
-      if (r !== prev) { toRecycle.add(prev); r } else prev
+        val r = applySharpening(prev, state.sharpening)
+        if (r !== prev) { toRecycle.add(prev); result = r }
+        r
     } else prev
     prev = sharpened
 
     val noised = if (state.noise != 0f) {
-      val r = applyNoise(prev, state.noise)
-      if (r !== prev) { toRecycle.add(prev); r } else prev
+        val r = applyNoise(prev, state.noise)
+        if (r !== prev) { toRecycle.add(prev); result = r }
+        r
     } else prev
     prev = noised
 
     val cropped = applyCrop(prev, state)
     if (cropped !== prev) { toRecycle.add(prev) }
-    return cropped
+    prev = cropped
+
+    // Apply date imprint AFTER all other adjustments so it's preserved
+    // even when applyTone returns the original source (early return when all sliders are 0)
+    val final = if (state.dateImprint.enabled) {
+        val r = DateImprintProcessor.burn(prev, state.dateImprint, date, context)
+        if (r !== prev) { toRecycle.add(prev); r } else prev
+    } else prev
+    return final
   } catch (e: Throwable) {
     toRecycle.forEach { it.recycle() }
     throw e
@@ -361,15 +334,16 @@ fun processUpToFrame(source: Bitmap, state: EditState, lut: LutFile?, date: java
         return out
     }
 
-    // ── Tone adjustments ───────────────────────────────────────────────────────
+// ── Tone adjustments ───────────────────────────────────────────────────────
 
-    private fun applyTone(src: Bitmap, state: EditState): Bitmap {
-        if (state.exposure == 0f && state.luminosity == 0f && state.contrast == 0f &&
-            state.highlights == 0f && state.shadows == 0f && state.saturation == 0f &&
-            state.vibrance == 0f && state.temperature == 0f && state.tint == 0f
-        ) return src
+private fun applyTone(src: Bitmap, state: EditState): Bitmap {
+    // NOTE: We intentionally do NOT early-return when all sliders are at 0.
+    // The early return would break the bitmap chain because applyTone would return
+    // the original source instead of a new bitmap, discarding any prior modifications
+    // (like date imprint). Both applyToneAgsl and applyToneSoftware create new bitmaps
+    // even when no adjustments are needed, preserving the chain.
 
-        // API 33+: use AGSL RuntimeShader (executed by Skia — much faster than Kotlin JVM)
+    // API 33+: use AGSL RuntimeShader (executed by Skia — much faster than Kotlin JVM)
         if (Build.VERSION.SDK_INT >= 33) {
             @Suppress("NewApi")
             applyToneAgsl(src, state)?.let { return it }
