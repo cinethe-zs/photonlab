@@ -121,86 +121,131 @@ fun process(source: Bitmap, state: EditState, lut: LutFile?, date: java.util.Dat
  return if (state.frameEnabled) applyFrame(preFrame, state) else preFrame
  }
 
-    private fun shouldUseTiling(source: Bitmap, state: EditState): Boolean {
-        if (source.width <= 0 || source.height <= 0) return false
-        if (source.width * source.height <= LARGE_IMAGE_THRESHOLD) return false
-        if (state.rotation != 0) return false
-        if (state.fineRotation != 0f) return false
-        return true
-    }
+private fun shouldUseTiling(source: Bitmap, state: EditState): Boolean {
+		if (source.width <= 0 || source.height <= 0) return false
+		if (source.width * source.height <= LARGE_IMAGE_THRESHOLD) return false
+		// Allow tiling even with rotation - we'll handle it specially in tiled processing
+		return true
+	}
 
-    /**
-     * Tile-based processing for large images. Processes the image in horizontal
-     * strips (256px height) to limit peak memory usage. Each tile goes through
-     * the pipeline except date imprint (applied once to full output).
-     */
-    private fun processUpToFrameTiled(source: Bitmap, state: EditState, lut: LutFile?, date: java.util.Date): Bitmap {
-        val totalHeight = source.height
-        val width = source.width
+/**
+	 * Tile-based processing for large images. Processes the image in horizontal
+	 * strips (256px height) to limit peak memory usage. Each tile goes through
+	 * the pipeline except date imprint (applied once to full output).
+	 *
+	 * For rotated images, rotation is applied BEFORE tiling to create a single
+	 * intermediate rotated bitmap, then tiling operates on that rotated image.
+	 * This limits memory usage even for large rotated images.
+	 */
+	private fun processUpToFrameTiled(source: Bitmap, state: EditState, lut: LutFile?, date: java.util.Date): Bitmap {
+		// Apply crop FIRST so tile calculations use cropped dimensions.
+		// This avoids tile coordinates extending beyond bitmap bounds when crop reduces size.
+		// Example: source=4000x3000, crop to 2000x1500. Tiling must be based on 1500 height, not 3000.
+		val croppedSource = if (state.cropRect != null) applyCrop(source, state) else source
+		val toRecycleCrop = if (state.cropRect != null) source else null
 
-        if (width <= 0 || totalHeight <= 0) return source
+		// Apply rotation FIRST if enabled - creates one intermediate bitmap
+		// This is the key fix: instead of applying rotation to each tile (which would
+		// cause many intermediate bitmaps), we apply it once before tiling.
+		val rotatedSource = if (state.rotation != 0 || state.fineRotation != 0f) {
+			val r1 = if (state.rotation != 0) applyRotation(croppedSource, state.rotation) else croppedSource
+			val r2 = if (state.fineRotation != 0f) applyFineRotation(r1, state.fineRotation) else r1
+			// Recycle intermediate if different from originals
+			if (r1 !== croppedSource && croppedSource !== source) croppedSource.recycle()
+			if (r2 !== r1) r1.recycle()
+			r2
+		} else croppedSource
+		val toRecycleSource = if (rotatedSource !== croppedSource) croppedSource else null
 
-        val numTiles = ceil(totalHeight.toFloat() / TILE_HEIGHT_PIXELS).toInt()
-        if (numTiles <= 0) return source
+		// Now rotatedSource is what we tile
+		val totalHeight = rotatedSource.height
+		val width = rotatedSource.width
 
-        val output = try {
-            Bitmap.createBitmap(width, totalHeight, Bitmap.Config.ARGB_8888)
-        } catch (e: Throwable) {
-            return source
-        }
+		if (width <= 0 || totalHeight <= 0) {
+			toRecycleCrop?.recycle()
+			toRecycleSource?.recycle()
+			return source
+		}
 
-        val tileBufferSize = width * TILE_HEIGHT_PIXELS
-        val arrays = intArrayPool.getIntArrays(tileBufferSize.coerceAtLeast(width))
+		val numTiles = ceil(totalHeight.toFloat() / TILE_HEIGHT_PIXELS).toInt()
+		if (numTiles <= 0) {
+			toRecycleCrop?.recycle()
+			toRecycleSource?.recycle()
+			return source
+		}
 
-        try {
-            for (tileIndex in 0 until numTiles) {
-                val startY = tileIndex * TILE_HEIGHT_PIXELS
-                val endY = min(startY + TILE_HEIGHT_PIXELS, totalHeight)
-                val tileHeight = endY - startY
+		val output = try {
+			Bitmap.createBitmap(width, totalHeight, Bitmap.Config.ARGB_8888)
+		} catch (e: Throwable) {
+			toRecycleCrop?.recycle()
+			toRecycleSource?.recycle()
+			return source
+		}
 
-                if (tileHeight <= 0) continue
+		val tileBufferSize = width * TILE_HEIGHT_PIXELS
+		val arrays = intArrayPool.getIntArrays(tileBufferSize.coerceAtLeast(width))
 
-                val tile = Bitmap.createBitmap(source, 0, startY, width, tileHeight)
-                val processedTile = try {
-                    processUpToFrameNoDateImprint(tile, state, lut)
-                } catch (e: Throwable) {
-                    tile.recycle()
-                    output.recycle()
-                    throw e
-                }
+		// Process tiles using rotatedSource as the base (no crop or rotation in tile processing)
+		try {
+			for (tileIndex in 0 until numTiles) {
+				val startY = tileIndex * TILE_HEIGHT_PIXELS
+				val endY = min(startY + TILE_HEIGHT_PIXELS, totalHeight)
+				val tileHeight = endY - startY
 
-                try {
-                    val pixels = arrays[0]
-                    processedTile.getPixels(pixels, 0, processedTile.width, 0, 0, processedTile.width, tileHeight)
-                    output.setPixels(pixels, 0, processedTile.width, 0, startY, processedTile.width, tileHeight)
-                } catch (e: Throwable) {
-                    if (processedTile !== tile) processedTile.recycle()
-                    tile.recycle()
-                    output.recycle()
-                    throw e
-                }
+				if (tileHeight <= 0) continue
 
-                if (processedTile !== tile) processedTile.recycle()
-                tile.recycle()
-            }
+				// Tiles are created from rotated source, so coordinates are valid
+				val tile = Bitmap.createBitmap(rotatedSource, 0, startY, width, tileHeight)
+				val processedTile = try {
+					// Process tile WITHOUT applying crop/rotation (already applied to rotatedSource)
+					processUpToFrameNoDateImprintNoCrop(tile, state, lut)
+				} catch (e: Throwable) {
+					tile.recycle()
+					output.recycle()
+					toRecycleCrop?.recycle()
+					toRecycleSource?.recycle()
+					throw e
+				}
 
-            if (state.dateImprint.enabled) {
-                try {
-                    val result = DateImprintProcessor.burn(output, state.dateImprint, date, context)
-                    if (result !== output) output.recycle()
-                    return result
-                } catch (e: Throwable) {
-                    output.recycle()
-                    throw e
-                }
-            }
-        } catch (e: Throwable) {
-            output.recycle()
-            throw e
-        }
+				try {
+					val pixels = arrays[0]
+					processedTile.getPixels(pixels, 0, processedTile.width, 0, 0, processedTile.width, tileHeight)
+					output.setPixels(pixels, 0, processedTile.width, 0, startY, processedTile.width, tileHeight)
+				} catch (e: Throwable) {
+					if (processedTile !== tile) processedTile.recycle()
+					tile.recycle()
+					output.recycle()
+					toRecycleCrop?.recycle()
+					toRecycleSource?.recycle()
+					throw e
+				}
 
-        return output
-    }
+				if (processedTile !== tile) processedTile.recycle()
+				tile.recycle()
+			}
+
+			// Clean up intermediate bitmaps
+			toRecycleCrop?.recycle()
+			toRecycleSource?.recycle()
+
+			// Apply date imprint at the end to the merged result
+			if (state.dateImprint.enabled) {
+				try {
+					val result = DateImprintProcessor.burn(output, state.dateImprint, date, context)
+					if (result !== output) output.recycle()
+					return result
+				} catch (e: Throwable) {
+					output.recycle()
+					throw e
+				}
+			}
+		} catch (e: Throwable) {
+			output.recycle()
+			throw e
+		}
+
+		return output
+	}
 
 /**
      * Process pipeline without date imprint (used for tiled processing).
@@ -215,6 +260,20 @@ fun process(source: Bitmap, state: EditState, lut: LutFile?, date: java.util.Dat
         result = if (state.sharpening > 0f) applySharpening(result, state.sharpening) else result
         result = if (state.noise != 0f) applyNoise(result, state.noise) else result
         return applyCrop(result, state)
+    }
+
+    /**
+     * Process pipeline without date imprint AND without crop.
+     * Used for tiled processing where crop is applied BEFORE tiling to the full source image.
+     */
+    private fun processUpToFrameNoDateImprintNoCrop(source: Bitmap, state: EditState, lut: LutFile?): Bitmap {
+        var result = applyRotation(source, state.rotation)
+        result = applyFineRotation(result, state.fineRotation)
+        result = applyTone(result, state)
+        result = if (lut != null) applyLut(result, lut) else result
+        result = if (state.sharpening > 0f) applySharpening(result, state.sharpening) else result
+        result = if (state.noise != 0f) applyNoise(result, state.noise) else result
+        return result
     }
 
     /**
