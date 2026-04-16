@@ -138,64 +138,56 @@ private fun shouldUseTiling(source: Bitmap, state: EditState): Boolean {
 	 * This limits memory usage even for large rotated images.
 	 */
 	private fun processUpToFrameTiled(source: Bitmap, state: EditState, lut: LutFile?, date: java.util.Date): Bitmap {
-		// Apply crop FIRST so tile calculations use cropped dimensions.
-		// This avoids tile coordinates extending beyond bitmap bounds when crop reduces size.
-		// Example: source=4000x3000, crop to 2000x1500. Tiling must be based on 1500 height, not 3000.
-		val croppedSource = if (state.cropRect != null) applyCrop(source, state) else source
-		val toRecycleCrop = if (state.cropRect != null) source else null
+// Apply crop FIRST so tile calculations use cropped dimensions.
+    // This avoids tile coordinates extending beyond bitmap bounds when crop reduces size.
+    // Example: source=4000x3000, crop to 2000x1500. Tiling must be based on 1500 height, not 3000.
+    val croppedSource = if (state.cropRect != null) applyCrop(source, state) else source
+    val toRecycleCrop = if (state.cropRect != null) source else null
 
-// Apply rotation FIRST if enabled - creates one intermediate bitmap
-    // This is the key fix: instead of applying rotation to each tile (which would
-    // cause many intermediate bitmaps), we apply it once before tiling.
+    // Apply rotation FIRST if enabled - creates one intermediate bitmap.
+    // Recycle intermediates IMMEDIATELY when replaced to avoid complex deferred-cleanup logic.
     val rotatedSource: Bitmap
-    val toRecycleSource: Bitmap?
     if (state.rotation != 0 || state.fineRotation != 0f) {
-        val r1 = if (state.rotation != 0) applyRotation(croppedSource, state.rotation) else croppedSource
-        val r2 = if (state.fineRotation != 0f) applyFineRotation(r1, state.fineRotation) else r1
-        // Track intermediates for recycling: r1 came from croppedSource, r2 came from r1
-        val toRecycleR1 = if (r1 !== croppedSource) croppedSource else null
-        val toRecycleR2 = if (r2 !== r1) r1 else null
-        // r2 is the final rotated result
+        // Step 1: rotation
+        val r1 = if (state.rotation != 0) {
+            val result = applyRotation(croppedSource, state.rotation)
+            if (result !== croppedSource && croppedSource !== source) croppedSource.recycle()
+            result
+        } else croppedSource
+
+        // Step 2: fine rotation
+        val r2 = if (state.fineRotation != 0f) {
+            val result = applyFineRotation(r1, state.fineRotation)
+            if (result !== r1 && r1 !== croppedSource && r1 !== source) r1.recycle()
+            result
+        } else r1
+
         rotatedSource = r2
-        // r1 must be recycled after r2 is used (r2 might be r1, so only recycle if different)
-        toRecycleSource = toRecycleR2 ?: toRecycleR1
-        // Recycle intermediates after r2 is captured - only if they're different objects
-        if (r2 !== r1 && r1 !== croppedSource) {
-            r1.recycle()
-        }
-        if (r2 === r1 && r1 !== croppedSource) {
-            // r1 was created but r2 is the same object (fineRotation was 0)
-            croppedSource.recycle()
-        }
     } else {
         rotatedSource = croppedSource
-        toRecycleSource = null
     }
 
 		// Now rotatedSource is what we tile
 		val totalHeight = rotatedSource.height
 		val width = rotatedSource.width
 
-		if (width <= 0 || totalHeight <= 0) {
-			toRecycleCrop?.recycle()
-			toRecycleSource?.recycle()
-			return source
-		}
+if (width <= 0 || totalHeight <= 0) {
+        toRecycleCrop?.recycle()
+        return source
+    }
 
-		val numTiles = ceil(totalHeight.toFloat() / TILE_HEIGHT_PIXELS).toInt()
-		if (numTiles <= 0) {
-			toRecycleCrop?.recycle()
-			toRecycleSource?.recycle()
-			return source
-		}
+    val numTiles = ceil(totalHeight.toFloat() / TILE_HEIGHT_PIXELS).toInt()
+    if (numTiles <= 0) {
+        toRecycleCrop?.recycle()
+        return source
+    }
 
-		val output = try {
-			Bitmap.createBitmap(width, totalHeight, Bitmap.Config.ARGB_8888)
-		} catch (e: Throwable) {
-			toRecycleCrop?.recycle()
-			toRecycleSource?.recycle()
-			return source
-		}
+    val output = try {
+        Bitmap.createBitmap(width, totalHeight, Bitmap.Config.ARGB_8888)
+    } catch (e: Throwable) {
+        toRecycleCrop?.recycle()
+        return source
+    }
 
 		val tileBufferSize = width * TILE_HEIGHT_PIXELS
 		val arrays = intArrayPool.getIntArrays(tileBufferSize.coerceAtLeast(width))
@@ -215,36 +207,33 @@ val processedTile = try {
                 // Process tile WITHOUT applying crop/rotation (already applied to rotatedSource)
                 // Pass rotation=0 and fineRotation=0f since rotation was already applied to full image
                 processUpToFrameNoDateImprintNoCrop(tile, state.copy(rotation = 0, fineRotation = 0f, cropRect = null), lut)
-				} catch (e: Throwable) {
-					tile.recycle()
-					output.recycle()
-					toRecycleCrop?.recycle()
-					toRecycleSource?.recycle()
-					throw e
-				}
+} catch (e: Throwable) {
+        tile.recycle()
+        output.recycle()
+        toRecycleCrop?.recycle()
+        throw e
+    }
 
-				try {
-					val pixels = arrays[0]
-					processedTile.getPixels(pixels, 0, processedTile.width, 0, 0, processedTile.width, tileHeight)
-					output.setPixels(pixels, 0, processedTile.width, 0, startY, processedTile.width, tileHeight)
-				} catch (e: Throwable) {
-					if (processedTile !== tile) processedTile.recycle()
-					tile.recycle()
-					output.recycle()
-					toRecycleCrop?.recycle()
-					toRecycleSource?.recycle()
-					throw e
-				}
+    try {
+        val pixels = arrays[0]
+        processedTile.getPixels(pixels, 0, processedTile.width, 0, 0, processedTile.width, tileHeight)
+        output.setPixels(pixels, 0, processedTile.width, 0, startY, processedTile.width, tileHeight)
+    } catch (e: Throwable) {
+        if (processedTile !== tile) processedTile.recycle()
+        tile.recycle()
+        output.recycle()
+        toRecycleCrop?.recycle()
+        throw e
+    }
 
-				if (processedTile !== tile) processedTile.recycle()
-				tile.recycle()
-			}
+if (processedTile !== tile) processedTile.recycle()
+        tile.recycle()
+    }
 
-			// Clean up intermediate bitmaps
-			toRecycleCrop?.recycle()
-			toRecycleSource?.recycle()
+    // Clean up cropped source (rotatedSource is used for tiles and will be recycled when no longer needed)
+    toRecycleCrop?.recycle()
 
-			// Apply date imprint at the end to the merged result
+    // Apply date imprint at the end to the merged result
 			if (state.dateImprint.enabled) {
 				try {
 					val result = DateImprintProcessor.burn(output, state.dateImprint, date, context)
