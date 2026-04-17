@@ -39,3 +39,7 @@ lint-results*
 
 # ── Test results ─────────────────────────────────────────────────────────────
 test-results/
+build-out.txt
+.github/workflows/opencode.yml
+dist/photonlab_2.0.0_amd64.deb
+dist/photonlab-2.0.0.exe
