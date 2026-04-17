@@ -944,21 +944,22 @@ private fun transformCropRectForRotation(cropRect: com.photonlab.domain.model.No
     // For non-square images the ratio H/W converts rotated-dim fractions to original-dim fractions.
 
     return when (rotation) {
-    90 -> {
-        // Original W×H → Rotated H×W
-        // Desired on rotated: newLeft (fraction of H), newTop (fraction of W)
-        // Inverse: original left uses H-based dims, original top uses W-based dims
-        val origLeft = 1f - newTop - newWidth
-        val origTop = newLeft
-        val origWidth = newHeight
-        val origHeight = newWidth
-        com.photonlab.domain.model.NormalizedRect(
-            left = origLeft,
-            top = origTop,
-            right = origLeft + origWidth,
-            bottom = origTop + origHeight
-        )
-    }
+90 -> {
+    // Inverse transform: desired crop on rotated (H×W) → original crop on original (W×H)
+    // x' = y, y' = W-1-x (forward), so x = y', y = W-1-y' (inverse)
+    // Original left edge = newTop (since x' = y, left edge maps directly)
+    // Original top edge = W-1 - newRight (since y' = W-1-x, right edge maps to top)
+    val origLeft = newTop
+    val origTop = 1f - newRight
+    val origWidth = newHeight
+    val origHeight = newWidth
+    com.photonlab.domain.model.NormalizedRect(
+        left = origLeft,
+        top = origTop,
+        right = origLeft + origWidth,
+        bottom = origTop + origHeight
+    )
+}
     180 -> {
         // Same dimensions, flip both axes
         val origLeft = 1f - newRight
