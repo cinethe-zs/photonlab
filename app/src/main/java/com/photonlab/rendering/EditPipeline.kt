@@ -960,24 +960,24 @@ private fun transformCropRectForRotation(cropRect: com.photonlab.domain.model.No
         bottom = origTop + origHeight
     )
 }
-    180 -> {
-        // Same dimensions, flip both axes
-        val origLeft = 1f - newRight
-        val origTop = 1f - newBottom
-        com.photonlab.domain.model.NormalizedRect(
-            left = origLeft,
-            top = origTop,
-            right = newLeft,
-            bottom = newTop
-        )
-    }
-    270 -> {
-        // Original W×H → Rotated H×W
-        // Inverse of 90° CW
-        val origLeft = newTop
-        val origTop = 1f - newLeft - newWidth
-        val origWidth = newHeight
-        val origHeight = newWidth
+180 -> {
+                // Same dimensions, flip both axes
+                val origLeft = 1f - newRight
+                val origTop = 1f - newBottom
+                com.photonlab.domain.model.NormalizedRect(
+                    left = origLeft,
+                    top = origTop,
+                    right = origLeft + newWidth,
+                    bottom = origTop + newHeight
+                )
+            }
+270 -> {
+                // Original W×H → Rotated H×W
+                // Inverse of 90° CW (mirror logic from 90°)
+                val origLeft = newTop
+                val origTop = 1f - newTop - newHeight
+                val origWidth = newHeight
+                val origHeight = newWidth
         com.photonlab.domain.model.NormalizedRect(
             left = origLeft,
             top = origTop,
