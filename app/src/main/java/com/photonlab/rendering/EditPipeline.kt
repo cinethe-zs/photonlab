@@ -155,8 +155,8 @@ private fun processUpToFrameTiled(source: Bitmap, state: EditState, lut: LutFile
     // For fine rotation with crop: rotate full image first, then crop
     // For crop only (no rotation): crop directly
     val preProcessed: Bitmap
-    val toRecyclePre = if (hasFineRotationOnly && state.cropRect != null) {
-        // Fine rotation only path: rotate full image FIRST, then crop
+    val toRecyclePre = if (hasFineRotationOnly) {
+        // Fine rotation path: apply fine rotation (then crop if cropRect is not null)
         val rotated = if (state.fineRotation != 0f) {
             applyFineRotation(source, state.fineRotation)
         } else source
@@ -164,14 +164,20 @@ private fun processUpToFrameTiled(source: Bitmap, state: EditState, lut: LutFile
             val cropped = applyCrop(rotated, state.copy(fineRotation = 0f))
             if (cropped !== rotated) rotated.recycle()
             cropped
-        } else rotated
+        } else {
+            rotated
+        }
         if (preProcessed !== source) source else null
     } else {
-        // Original path: crop first (for 90/180/270 or no rotation)
+        // 90/180/270 or no rotation: crop first (with transformed crop rect if needed)
         val cropRectForRotation = if (effectiveRotation != 0 && state.cropRect != null) {
             transformCropRectForRotation(state.cropRect, effectiveRotation)
         } else state.cropRect
-        val stateForCrop = if (cropRectForRotation != null) state.copy(cropRect = cropRectForRotation) else state
+        val stateForCrop = if (cropRectForRotation != null) {
+            state.copy(cropRect = cropRectForRotation, fineRotation = 0f)
+        } else {
+            state.copy(fineRotation = 0f)
+        }
         preProcessed = if (cropRectForRotation != null) applyCrop(source, stateForCrop) else source
         if (cropRectForRotation != null) source else null
     }
