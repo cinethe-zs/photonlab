@@ -154,21 +154,19 @@ private fun processUpToFrameTiled(source: Bitmap, state: EditState, lut: LutFile
     // For 90/180/270 with crop: transform crop rect first (dims swap)
     // For fine rotation with crop: rotate full image first, then crop
     // For crop only (no rotation): crop directly
-    val preProcessed: Bitmap
-    val toRecyclePre = if (hasFineRotationOnly) {
-        // Fine rotation path: apply fine rotation (then crop if cropRect is not null)
-        val rotated = if (state.fineRotation != 0f) {
-            applyFineRotation(source, state.fineRotation)
-        } else source
-        preProcessed = if (state.cropRect != null) {
-            val cropped = applyCrop(rotated, state.copy(fineRotation = 0f))
-            if (cropped !== rotated) rotated.recycle()
-            cropped
-        } else {
-            rotated
-        }
-        if (preProcessed !== source) source else null
-    } else {
+val preProcessed: Bitmap
+ val toRecyclePre = if (hasFineRotationOnly) {
+ // Fine rotation path: apply fine rotation first (then crop if cropRect is set)
+ val rotated = if (state.fineRotation != 0f) {
+ applyFineRotation(source, state.fineRotation)
+ } else source
+ preProcessed = if (state.cropRect != null) {
+ val cropped = applyCrop(rotated, state.copy(fineRotation = 0f))
+ if (cropped !== rotated) rotated.recycle()
+ cropped
+ } else rotated
+ if (preProcessed !== source) source else null
+ } else {
         // 90/180/270 or no rotation: crop first (with transformed crop rect if needed)
         val cropRectForRotation = if (effectiveRotation != 0 && state.cropRect != null) {
             transformCropRectForRotation(state.cropRect, effectiveRotation)
@@ -192,8 +190,9 @@ private fun processUpToFrameTiled(source: Bitmap, state: EditState, lut: LutFile
         rotatedSource = preProcessed
     }
 
-    // Apply fine rotation AFTER step rotation when both are present
-    if (state.fineRotation != 0f) {
+// Apply fine rotation AFTER step rotation when both are present
+// (skip if hasFineRotationOnly - fine rotation already applied to full image earlier)
+if (state.fineRotation != 0f && !hasFineRotationOnly) {
         val fineResult = applyFineRotation(rotatedSource, state.fineRotation)
         if (fineResult !== rotatedSource) {
             if (rotatedSource !== preProcessed && rotatedSource !== source) rotatedSource.recycle()
