@@ -142,41 +142,48 @@ private fun processUpToFrameTiled(source: Bitmap, state: EditState, lut: LutFile
     // After 90°/270° rotation, dimensions are swapped so we must transform
     // cropRect BEFORE applying crop. Otherwise the same normalized coords map
     // to a different area. E.g. 90° clockwise: left→top, top→right, dims swap.
-    val effectiveRotation = if (state.fineRotation != 0f) 0 else state.rotation
-    val cropRectForRotation = if (effectiveRotation != 0 && state.cropRect != null) {
-        transformCropRectForRotation(state.cropRect, effectiveRotation)
-    } else state.cropRect
+    //
+    // For fine rotation (no step rotation), rotation must be applied BEFORE crop
+    // to match the non-tiled preview path. This is because fine rotation doesn't
+    // swap dimensions, so the crop rect doesn't need transforming but DOES need
+    // to be applied to the rotated image (not the original).
 
-    // Build a state with the (possibly transformed) cropRect for applyCrop
-    val stateForCrop = if (cropRectForRotation != null) state.copy(cropRect = cropRectForRotation) else state
+    val hasFineRotationOnly = state.fineRotation != 0f && state.rotation == 0
+    val effectiveRotation = if (hasFineRotationOnly) 0 else state.rotation
 
-    // Apply crop FIRST so tile calculations use cropped dimensions.
-    // This avoids tile coordinates extending beyond bitmap bounds when crop reduces size.
-    // Example: source=4000x3000, crop to 2000x1500. Tiling must be based on 1500 height, not 3000.
-    val croppedSource = if (cropRectForRotation != null) applyCrop(source, stateForCrop) else source
-    val toRecycleCrop = if (cropRectForRotation != null) source else null
-
-    // Apply rotation FIRST if enabled - creates one intermediate bitmap.
-    // Recycle intermediates IMMEDIATELY when replaced to avoid complex deferred-cleanup logic.
-    val rotatedSource: Bitmap
-    if (state.rotation != 0 || state.fineRotation != 0f) {
-        // Step 1: rotation
-        val r1 = if (state.rotation != 0) {
-            val result = applyRotation(croppedSource, state.rotation)
-            if (result !== croppedSource && croppedSource !== source) croppedSource.recycle()
-            result
-        } else croppedSource
-
-        // Step 2: fine rotation
-        val r2 = if (state.fineRotation != 0f) {
-            val result = applyFineRotation(r1, state.fineRotation)
-            if (result !== r1 && r1 !== croppedSource && r1 !== source) r1.recycle()
-            result
-        } else r1
-
-        rotatedSource = r2
+    // For 90/180/270 with crop: transform crop rect first (dims swap)
+    // For fine rotation with crop: rotate full image first, then crop
+    // For crop only (no rotation): crop directly
+    val preProcessed: Bitmap
+    val toRecyclePre = if (hasFineRotationOnly && state.cropRect != null) {
+        // Fine rotation only path: rotate full image FIRST, then crop
+        val rotated = if (state.fineRotation != 0f) {
+            applyFineRotation(source, state.fineRotation)
+        } else source
+        preProcessed = if (state.cropRect != null) {
+            val cropped = applyCrop(rotated, state.copy(fineRotation = 0f))
+            if (cropped !== rotated) rotated.recycle()
+            cropped
+        } else rotated
+        if (preProcessed !== source) source else null
     } else {
-        rotatedSource = croppedSource
+        // Original path: crop first (for 90/180/270 or no rotation)
+        val cropRectForRotation = if (effectiveRotation != 0 && state.cropRect != null) {
+            transformCropRectForRotation(state.cropRect, effectiveRotation)
+        } else state.cropRect
+        val stateForCrop = if (cropRectForRotation != null) state.copy(cropRect = cropRectForRotation) else state
+        preProcessed = if (cropRectForRotation != null) applyCrop(source, stateForCrop) else source
+        if (cropRectForRotation != null) source else null
+    }
+
+    // Apply step rotation if needed (90/180/270)
+    val rotatedSource: Bitmap
+    if (state.rotation != 0) {
+        val result = applyRotation(preProcessed, state.rotation)
+        if (result !== preProcessed && preProcessed !== source) preProcessed.recycle()
+        rotatedSource = result
+    } else {
+        rotatedSource = preProcessed
     }
 
 		// Now rotatedSource is what we tile
@@ -184,20 +191,20 @@ private fun processUpToFrameTiled(source: Bitmap, state: EditState, lut: LutFile
 		val width = rotatedSource.width
 
 if (width <= 0 || totalHeight <= 0) {
-        toRecycleCrop?.recycle()
+        toRecyclePre?.recycle()
         return source
     }
 
     val numTiles = ceil(totalHeight.toFloat() / TILE_HEIGHT_PIXELS).toInt()
     if (numTiles <= 0) {
-        toRecycleCrop?.recycle()
+        toRecyclePre?.recycle()
         return source
     }
 
     val output = try {
         Bitmap.createBitmap(width, totalHeight, Bitmap.Config.ARGB_8888)
     } catch (e: Throwable) {
-        toRecycleCrop?.recycle()
+        toRecyclePre?.recycle()
         return source
     }
 
@@ -222,7 +229,7 @@ val processedTile = try {
 } catch (e: Throwable) {
         tile.recycle()
         output.recycle()
-        toRecycleCrop?.recycle()
+        toRecyclePre?.recycle()
         throw e
     }
 
@@ -234,7 +241,7 @@ val processedTile = try {
         if (processedTile !== tile) processedTile.recycle()
         tile.recycle()
         output.recycle()
-        toRecycleCrop?.recycle()
+        toRecyclePre?.recycle()
         throw e
     }
 
@@ -243,7 +250,7 @@ if (processedTile !== tile) processedTile.recycle()
     }
 
     // Clean up cropped source (rotatedSource is used for tiles and will be recycled when no longer needed)
-    toRecycleCrop?.recycle()
+    toRecyclePre?.recycle()
 
     // Apply date imprint at the end to the merged result
 			if (state.dateImprint.enabled) {
@@ -972,19 +979,21 @@ private fun transformCropRectForRotation(cropRect: com.photonlab.domain.model.No
                 )
             }
 270 -> {
-                // Original W×H → Rotated H×W
-                // Inverse of 90° CW (mirror logic from 90°)
-                val origLeft = newTop
-                val origTop = 1f - newTop - newHeight
-                val origWidth = newHeight
-                val origHeight = newWidth
-        com.photonlab.domain.model.NormalizedRect(
-            left = origLeft,
-            top = origTop,
-            right = origLeft + origWidth,
-            bottom = origTop + origHeight
-        )
-    }
+    // Original W×H → Rotated H×W
+    // Forward 270° CW: x' = H-1-y, y' = x
+    // Inverse (to find original coords from rotated crop):
+    //   x = y', y = H-1-x'  →  origLeft = newTop, origTop = 1 - newLeft
+    val origLeft = newTop
+    val origTop = 1f - newLeft
+    val origWidth = newHeight
+    val origHeight = newWidth
+    com.photonlab.domain.model.NormalizedRect(
+        left = origLeft,
+        top = origTop,
+        right = origLeft + origWidth,
+        bottom = origTop + origHeight
+    )
+}
     else -> cropRect
     }
 }
