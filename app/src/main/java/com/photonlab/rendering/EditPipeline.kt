@@ -907,12 +907,20 @@ private fun transformCropRectForRotation(cropRect: com.photonlab.domain.model.No
     val origRight = cropRect.right
     val origBottom = cropRect.bottom
 
+// For 90°/270° rotations, dimensions swap (W×H → H×W), so we must
+    // adjust the rect so that width/height in the *new* coordinate space
+    // correctly reflect the physical crop region from the original.
+    // After 90° CW: newWidth = original height, newHeight = original width
+    // After 270° CW: same swap
+    val origWidth = origRight - origLeft
+    val origHeight = origBottom - origTop
+
     return when (rotation) {
         90 -> com.photonlab.domain.model.NormalizedRect(
-            left = 1f - origBottom,  // original bottom → left
-            top = origLeft,           // original left → top
-            right = 1f - origTop,    // original top → right
-            bottom = origRight        // original right → bottom
+            left = 1f - origBottom, // original bottom → left
+            top = origLeft, // original left → top
+            right = 1f - origBottom + origHeight, // left + newWidth (origHeight)
+            bottom = origLeft + origWidth // top + newHeight (origWidth)
         )
         180 -> com.photonlab.domain.model.NormalizedRect(
             left = 1f - origRight,
@@ -921,12 +929,12 @@ private fun transformCropRectForRotation(cropRect: com.photonlab.domain.model.No
             bottom = 1f - origTop
         )
         270 -> com.photonlab.domain.model.NormalizedRect(
-            left = origTop,           // original top → left
-            top = 1f - origRight,    // original right → top
-            right = origBottom,       // original bottom → right
-            bottom = 1f - origLeft   // original left → bottom
+            left = origTop, // original top → left
+            top = 1f - origRight, // original right → top
+            right = origTop + origHeight, // left + newWidth (origHeight)
+            bottom = 1f - origRight + origWidth // top + newHeight (origWidth)
         )
-else -> cropRect
+        else -> cropRect
     }
 }
 
