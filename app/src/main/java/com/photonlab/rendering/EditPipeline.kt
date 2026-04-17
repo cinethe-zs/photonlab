@@ -164,9 +164,9 @@ val preProcessed: Bitmap
  val cropped = applyCrop(rotated, state.copy(fineRotation = 0f))
  if (cropped !== rotated) rotated.recycle()
  cropped
- } else rotated
- if (preProcessed !== source) source else null
- } else {
+} else rotated
+    if (preProcessed !== source) preProcessed else null
+  } else {
         // 90/180/270 or no rotation: crop first (with transformed crop rect if needed)
         val cropRectForRotation = if (effectiveRotation != 0 && state.cropRect != null) {
             transformCropRectForRotation(state.cropRect, effectiveRotation)
@@ -176,8 +176,8 @@ val preProcessed: Bitmap
         } else {
             state.copy(fineRotation = 0f)
         }
-        preProcessed = if (cropRectForRotation != null) applyCrop(source, stateForCrop) else source
-        if (cropRectForRotation != null) source else null
+preProcessed = if (cropRectForRotation != null) applyCrop(source, stateForCrop) else source
+    if (cropRectForRotation != null && preProcessed !== source) preProcessed else null
     }
 
 // Apply step rotation if needed (90/180/270)
