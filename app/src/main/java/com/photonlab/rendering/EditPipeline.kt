@@ -176,15 +176,33 @@ private fun processUpToFrameTiled(source: Bitmap, state: EditState, lut: LutFile
         if (cropRectForRotation != null) source else null
     }
 
-    // Apply step rotation if needed (90/180/270)
-    val rotatedSource: Bitmap
-    if (state.rotation != 0) {
-        val result = applyRotation(preProcessed, state.rotation)
+// Apply step rotation if needed (90/180/270)
+val rotatedSource: Bitmap = when (state.rotation) {
+    90 -> {
+        // Apply 90° directly
+        val result = applyRotation(preProcessed, 90)
         if (result !== preProcessed && preProcessed !== source) preProcessed.recycle()
-        rotatedSource = result
-    } else {
-        rotatedSource = preProcessed
+        result
     }
+    180 -> {
+        // Apply 180° directly
+        val result = applyRotation(preProcessed, 180)
+        if (result !== preProcessed && preProcessed !== source) preProcessed.recycle()
+        result
+    }
+    270 -> {
+        // 270° = 180° + 90° (apply 180° first, then 90°)
+        val after180 = applyRotation(preProcessed, 180)
+        val after90 = applyRotation(after180, 90)
+        if (after180 !== preProcessed && after180 !== source) after180.recycle()
+        if (after90 !== preProcessed && preProcessed !== source) preProcessed.recycle()
+        after90
+    }
+    else -> {
+        if (preProcessed !== source) preProcessed.recycle()
+        preProcessed
+    }
+}
 
 		// Now rotatedSource is what we tile
 		val totalHeight = rotatedSource.height
@@ -952,17 +970,21 @@ private fun transformCropRectForRotation(cropRect: com.photonlab.domain.model.No
 
     return when (rotation) {
 90 -> {
-                val origLeft = 1f - newTop - newHeight
-                val origTop = newLeft
-                val origWidth = newHeight
-                val origHeight = newWidth
-                com.photonlab.domain.model.NormalizedRect(
-                    left = origLeft,
-                    top = origTop,
-                    right = origLeft + origWidth,
-                    bottom = origTop + origHeight
-                )
-            }
+    // Inverse transform: desired crop on rotated (H×W) → original crop on original (W×H)
+    // x' = y, y' = W-1-x (forward), so x = y', y = W-1-y' (inverse)
+    // Original left edge = newTop (since x' = y, left edge maps directly)
+    // Original top edge = W-1 - newRight (since y' = W-1-x, right edge maps to top)
+    val origLeft = newTop
+    val origTop = 1f - newRight
+    val origWidth = newHeight
+    val origHeight = newWidth
+    com.photonlab.domain.model.NormalizedRect(
+        left = origLeft,
+        top = origTop,
+        right = origLeft + origWidth,
+        bottom = origTop + origHeight
+    )
+}
 180 -> {
                 // Same dimensions, flip both axes
                 val origLeft = 1f - newRight
@@ -975,17 +997,21 @@ private fun transformCropRectForRotation(cropRect: com.photonlab.domain.model.No
                 )
             }
 270 -> {
-                val origLeft = newTop
-                val origTop = 1f - newLeft - newWidth
-                val origWidth = newHeight
-                val origHeight = newWidth
-                com.photonlab.domain.model.NormalizedRect(
-                    left = origLeft,
-                    top = origTop,
-                    right = origLeft + origWidth,
-                    bottom = origTop + origHeight
-                )
-            }
+    // Original W×H → Rotated H×W
+    // Forward 270° CW: x' = H-1-y, y' = x
+    // Inverse (to find original coords from rotated crop):
+    //   x = y', y = H-1-x'  →  origLeft = newTop, origTop = 1 - newLeft
+    val origLeft = newTop
+    val origTop = 1f - newLeft
+    val origWidth = newHeight
+    val origHeight = newWidth
+    com.photonlab.domain.model.NormalizedRect(
+        left = origLeft,
+        top = origTop,
+        right = origLeft + origWidth,
+        bottom = origTop + origHeight
+    )
+}
     else -> cropRect
     }
 }
