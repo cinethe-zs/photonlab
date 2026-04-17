@@ -979,12 +979,12 @@ private fun transformCropRectForRotation(cropRect: com.photonlab.domain.model.No
                 )
             }
 270 -> {
-    // Original W×H → Rotated H×W
-    // Forward 270° CW: x' = H-1-y, y' = x
-    // Inverse (to find original coords from rotated crop):
-    //   x = y', y = H-1-x'  →  origLeft = newTop, origTop = 1 - newLeft
-    val origLeft = newTop
-    val origTop = 1f - newLeft
+                // Original W×H → Rotated H×W
+                // Forward 270° CW: x' = y, y' = W-1-x (270° CW = 90° CCW)
+                // Inverse (to find original coords from rotated crop):
+                // x = W-1-y', y = x' → origLeft = 1 - newTop, origTop = newLeft
+                val origLeft = 1f - newTop
+                val origTop = newLeft
     val origWidth = newHeight
     val origHeight = newWidth
     com.photonlab.domain.model.NormalizedRect(
