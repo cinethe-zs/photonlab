@@ -176,8 +176,8 @@ private fun processUpToFrameTiled(source: Bitmap, state: EditState, lut: LutFile
         if (cropRectForRotation != null) source else null
     }
 
-    // Apply step rotation if needed (90/180/270)
-    val rotatedSource: Bitmap
+// Apply step rotation if needed (90/180/270)
+    var rotatedSource: Bitmap
     if (state.rotation != 0) {
         val result = applyRotation(preProcessed, state.rotation)
         if (result !== preProcessed && preProcessed !== source) preProcessed.recycle()
@@ -186,7 +186,16 @@ private fun processUpToFrameTiled(source: Bitmap, state: EditState, lut: LutFile
         rotatedSource = preProcessed
     }
 
-		// Now rotatedSource is what we tile
+    // Apply fine rotation AFTER step rotation when both are present
+    if (state.fineRotation != 0f) {
+        val fineResult = applyFineRotation(rotatedSource, state.fineRotation)
+        if (fineResult !== rotatedSource) {
+            if (rotatedSource !== preProcessed && rotatedSource !== source) rotatedSource.recycle()
+            rotatedSource = fineResult
+        }
+    }
+
+    // Now rotatedSource is what we tile
 		val totalHeight = rotatedSource.height
 		val width = rotatedSource.width
 
