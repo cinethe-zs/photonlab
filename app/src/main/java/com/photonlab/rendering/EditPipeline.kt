@@ -952,21 +952,17 @@ private fun transformCropRectForRotation(cropRect: com.photonlab.domain.model.No
 
     return when (rotation) {
 90 -> {
-    // Inverse transform: desired crop on rotated (H×W) → original crop on original (W×H)
-    // x' = y, y' = W-1-x (forward), so x = y', y = W-1-y' (inverse)
-    // Original left edge = newTop (since x' = y, left edge maps directly)
-    // Original top edge = W-1 - newRight (since y' = W-1-x, right edge maps to top)
-    val origLeft = newTop
-    val origTop = 1f - newRight
-    val origWidth = newHeight
-    val origHeight = newWidth
-    com.photonlab.domain.model.NormalizedRect(
-        left = origLeft,
-        top = origTop,
-        right = origLeft + origWidth,
-        bottom = origTop + origHeight
-    )
-}
+                val origLeft = 1f - newTop - newHeight
+                val origTop = newLeft
+                val origWidth = newHeight
+                val origHeight = newWidth
+                com.photonlab.domain.model.NormalizedRect(
+                    left = origLeft,
+                    top = origTop,
+                    right = origLeft + origWidth,
+                    bottom = origTop + origHeight
+                )
+            }
 180 -> {
                 // Same dimensions, flip both axes
                 val origLeft = 1f - newRight
@@ -979,21 +975,17 @@ private fun transformCropRectForRotation(cropRect: com.photonlab.domain.model.No
                 )
             }
 270 -> {
-                // Original W×H → Rotated H×W
-                // Forward 270° CW: x' = y, y' = W-1-x (270° CW = 90° CCW)
-                // Inverse (to find original coords from rotated crop):
-                // x = W-1-y', y = x' → origLeft = 1 - newTop, origTop = newLeft
-                val origLeft = 1f - newTop
-                val origTop = newLeft
-    val origWidth = newHeight
-    val origHeight = newWidth
-    com.photonlab.domain.model.NormalizedRect(
-        left = origLeft,
-        top = origTop,
-        right = origLeft + origWidth,
-        bottom = origTop + origHeight
-    )
-}
+                val origLeft = newTop
+                val origTop = 1f - newLeft - newWidth
+                val origWidth = newHeight
+                val origHeight = newWidth
+                com.photonlab.domain.model.NormalizedRect(
+                    left = origLeft,
+                    top = origTop,
+                    right = origLeft + origWidth,
+                    bottom = origTop + origHeight
+                )
+            }
     else -> cropRect
     }
 }
