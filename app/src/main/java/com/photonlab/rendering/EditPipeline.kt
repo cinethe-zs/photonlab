@@ -166,18 +166,11 @@ val preProcessed: Bitmap
  cropped
 } else rotated
     if (preProcessed !== source) preProcessed else null
-  } else {
-        // 90/180/270 or no rotation: crop first (with transformed crop rect if needed)
-        val cropRectForRotation = if (effectiveRotation != 0 && state.cropRect != null) {
-            transformCropRectForRotation(state.cropRect, effectiveRotation)
-        } else state.cropRect
-        val stateForCrop = if (cropRectForRotation != null) {
-            state.copy(cropRect = cropRectForRotation, fineRotation = 0f)
-        } else {
-            state.copy(fineRotation = 0f)
-        }
-preProcessed = if (cropRectForRotation != null) applyCrop(source, stateForCrop) else source
-    if (cropRectForRotation != null && preProcessed !== source) preProcessed else null
+} else {
+        // 90/180/270: rotate first, then crop (like preview path)
+        // The crop will be applied after rotation below
+        preProcessed = source
+        null // toRecyclePre - nothing separate from source
     }
 
 // Apply step rotation if needed (90/180/270)
@@ -200,18 +193,31 @@ if (state.fineRotation != 0f && !hasFineRotationOnly) {
         }
     }
 
-    // Now rotatedSource is what we tile
-		val totalHeight = rotatedSource.height
-		val width = rotatedSource.width
+    // Apply crop AFTER rotation (like preview path)
+    val croppedSource: Bitmap
+    val toRecycleForCrop: Bitmap?
+    if (state.cropRect != null) {
+        croppedSource = applyCrop(rotatedSource, state.copy(fineRotation = 0f))
+        toRecycleForCrop = if (croppedSource !== rotatedSource) rotatedSource else null
+    } else {
+        croppedSource = rotatedSource
+        toRecycleForCrop = null
+    }
+
+// Now croppedSource is what we tile
+    val totalHeight = croppedSource.height
+    val width = croppedSource.width
 
 if (width <= 0 || totalHeight <= 0) {
         toRecyclePre?.recycle()
+        toRecycleForCrop?.recycle()
         return source
     }
 
     val numTiles = ceil(totalHeight.toFloat() / TILE_HEIGHT_PIXELS).toInt()
     if (numTiles <= 0) {
         toRecyclePre?.recycle()
+        toRecycleForCrop?.recycle()
         return source
     }
 
@@ -219,6 +225,7 @@ if (width <= 0 || totalHeight <= 0) {
         Bitmap.createBitmap(width, totalHeight, Bitmap.Config.ARGB_8888)
     } catch (e: Throwable) {
         toRecyclePre?.recycle()
+        toRecycleForCrop?.recycle()
         return source
     }
 
@@ -234,16 +241,17 @@ if (width <= 0 || totalHeight <= 0) {
 
 				if (tileHeight <= 0) continue
 
-				// Tiles are created from rotated source, so coordinates are valid
-				val tile = Bitmap.createBitmap(rotatedSource, 0, startY, width, tileHeight)
+// Tiles are created from cropped source, so coordinates are valid
+    val tile = Bitmap.createBitmap(croppedSource, 0, startY, width, tileHeight)
 val processedTile = try {
-                // Process tile WITHOUT applying crop/rotation (already applied to rotatedSource)
-                // Pass rotation=0 and fineRotation=0f since rotation was already applied to full image
-                processUpToFrameNoDateImprintNoCrop(tile, state.copy(rotation = 0, fineRotation = 0f, cropRect = null), lut)
-} catch (e: Throwable) {
+        // Process tile WITHOUT applying crop/rotation (already applied to croppedSource)
+        // Pass rotation=0 and fineRotation=0f since rotation was already applied to full image
+        processUpToFrameNoDateImprintNoCrop(tile, state.copy(rotation = 0, fineRotation = 0f, cropRect = null), lut)
+    } catch (e: Throwable) {
         tile.recycle()
         output.recycle()
         toRecyclePre?.recycle()
+        toRecycleForCrop?.recycle()
         throw e
     }
 
@@ -256,6 +264,7 @@ val processedTile = try {
         tile.recycle()
         output.recycle()
         toRecyclePre?.recycle()
+        toRecycleForCrop?.recycle()
         throw e
     }
 
@@ -263,8 +272,9 @@ if (processedTile !== tile) processedTile.recycle()
         tile.recycle()
     }
 
-    // Clean up cropped source (rotatedSource is used for tiles and will be recycled when no longer needed)
+    // Clean up intermediate bitmaps
     toRecyclePre?.recycle()
+    toRecycleForCrop?.recycle()
 
     // Apply date imprint at the end to the merged result
 			if (state.dateImprint.enabled) {
