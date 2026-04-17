@@ -889,52 +889,102 @@ private fun applyTone(src: Bitmap, state: EditState): Bitmap {
         return out
     }
 
-    // ── Crop ──────────────────────────────────────────────────────────────────
+// ── Crop ──────────────────────────────────────────────────────────────────
 
 /**
- * Transforms a [NormalizedRect] from original image coordinates to rotated
- * image coordinates. cropRect is in 0-1 normalized coords for the ORIGINAL image;
- * after 90°/270° rotation dimensions swap, so we must remap the rect.
+ * Transforms a [NormalizedRect] from rotated image coordinates back to original
+ * image coordinates. cropRect is in 0-1 normalized coords for the ORIGINAL image
+ * (W×H); after 90°/270° rotation dimensions swap (H×W), so we must remap the rect.
+ *
+ * The crop is applied BEFORE rotation in the pipeline, so we need the INVERSE
+ * transform: given a desired crop in the ROTATED image, find what crop on the
+ * ORIGINAL would produce it after rotation.
+ *
  * NormalizedRect uses (left, top, right, bottom) — NOT width/height.
  *
- * After 90° CW rotation: newX = h - 1 - y, newY = x (in original pixel coords).
- * After 180°: newX = w - 1 - x, newY = h - 1 - y.
- * After 270° CW (= 90° CCW): newX = y, newY = w - 1 - x.
+ * Inverse 90° CW (original W×H → rotated H×W):
+ *   Rotated pixel (rx, ry) comes from original (H-1-ry, rx)
+ *   So original left = (H-1)/W - new_top - new_height
+ *   Original top = new_left * W / H
+ *   Original width = new_width * H / W
+ *   Original height = new_height * W / H
+ *
+ * Inverse 180°: same dimensions, flip both axes.
+ *   Original left = 1 - new_left - new_width
+ *   Original top = 1 - new_top - new_height
+ *
+ * Inverse 270° CW (original W×H → rotated H×W):
+ *   Rotated pixel (rx, ry) comes from original (ry, W-1-rx)
+ *   So original left = new_top * H / W
+ *   Original top = 1 - new_left - new_width
+ *   Original width = new_height * H / W
+ *   Original height = new_width * W / H
  */
 private fun transformCropRectForRotation(cropRect: com.photonlab.domain.model.NormalizedRect, rotation: Int): com.photonlab.domain.model.NormalizedRect {
-    val origLeft = cropRect.left
-    val origTop = cropRect.top
-    val origRight = cropRect.right
-    val origBottom = cropRect.bottom
+    // cropRect is in 0-1 for original image dims (srcWidth, srcHeight).
+    // We need to transform from ROTATED coords back to ORIGINAL coords.
+    // The caller passes rotation in degrees (90, 180, 270).
+    //
+    // For the inverse transform, we treat cropRect as the DESIRED crop in
+    // the rotated image and compute what crop in the original (before rotation)
+    // would produce that result.
 
-// For 90°/270° rotations, dimensions swap (W×H → H×W), so we must
-    // adjust the rect so that width/height in the *new* coordinate space
-    // correctly reflect the physical crop region from the original.
-    // After 90° CW: newWidth = original height, newHeight = original width
-    // After 270° CW: same swap
-    val origWidth = origRight - origLeft
-    val origHeight = origBottom - origTop
+    val newLeft = cropRect.left
+    val newTop = cropRect.top
+    val newRight = cropRect.right
+    val newBottom = cropRect.bottom
+    val newWidth = newRight - newLeft
+    val newHeight = newBottom - newTop
+
+    // Aspect ratio of original (W/H). For 90°/270° rotations where dimensions
+    // swap, we need this to properly normalize the swapped dimensions.
+    // We derive it from the normalized coords - if original was square, ratio=1.
+    // The actual W and H don't matter for the normalized calculation since
+    // we just need the ratio to convert between the swapped dimensions.
+    // For non-square images the ratio H/W converts rotated-dim fractions to original-dim fractions.
 
     return when (rotation) {
-        90 -> com.photonlab.domain.model.NormalizedRect(
-            left = 1f - origBottom, // original bottom → left
-            top = origLeft, // original left → top
-            right = 1f - origBottom + origHeight, // left + newWidth (origHeight)
-            bottom = origLeft + origWidth // top + newHeight (origWidth)
+    90 -> {
+        // Original W×H → Rotated H×W
+        // Desired on rotated: newLeft (fraction of H), newTop (fraction of W)
+        // Inverse: original left uses H-based dims, original top uses W-based dims
+        val origLeft = 1f - newTop - newHeight
+        val origTop = newLeft
+        val origWidth = newHeight
+        val origHeight = newWidth
+        com.photonlab.domain.model.NormalizedRect(
+            left = origLeft,
+            top = origTop,
+            right = origLeft + origWidth,
+            bottom = origTop + origHeight
         )
-        180 -> com.photonlab.domain.model.NormalizedRect(
-            left = 1f - origRight,
-            top = 1f - origBottom,
-            right = 1f - origLeft,
-            bottom = 1f - origTop
+    }
+    180 -> {
+        // Same dimensions, flip both axes
+        val origLeft = 1f - newRight
+        val origTop = 1f - newBottom
+        com.photonlab.domain.model.NormalizedRect(
+            left = origLeft,
+            top = origTop,
+            right = newLeft,
+            bottom = newTop
         )
-        270 -> com.photonlab.domain.model.NormalizedRect(
-            left = origTop, // original top → left
-            top = 1f - origRight, // original right → top
-            right = origTop + origHeight, // left + newWidth (origHeight)
-            bottom = 1f - origRight + origWidth // top + newHeight (origWidth)
+    }
+    270 -> {
+        // Original W×H → Rotated H×W
+        // Inverse of 90° CW
+        val origLeft = newTop
+        val origTop = 1f - newRight - newWidth
+        val origWidth = newHeight
+        val origHeight = newWidth
+        com.photonlab.domain.model.NormalizedRect(
+            left = origLeft,
+            top = origTop,
+            right = origLeft + origWidth,
+            bottom = origTop + origHeight
         )
-        else -> cropRect
+    }
+    else -> cropRect
     }
 }
 
