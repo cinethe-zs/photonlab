@@ -194,7 +194,7 @@ viewModelScope.launch(Dispatchers.IO) {
             ) }
         }
         val remaining = pendingExports.decrementAndGet()
-        if (remaining == 0) {
+        if (remaining == 0 && exportChannel.isEmpty) {
             _uiState.update { it.copy(pendingExportCount = 0, totalExports = 0, completedExports = 0) }
             if (totalBatchExports > 1) {
                 _uiState.update { it.copy(snackbarMessage = "Export complete") }
