@@ -32,6 +32,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.Redo
@@ -64,6 +65,7 @@ import androidx.compose.material3.FilledTonalIconButton
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Scaffold
@@ -411,15 +413,56 @@ fun EditorScreen(
                     .background(MaterialTheme.colorScheme.surface)
                     .onSizeChanged { bottomPanelHeightPx = it.height },
             ) {
-                Column {
-                    HorizontalDivider()
-                    ToolControls(
-                        state       = uiState,
-                        viewModel   = viewModel,
-                        onLutPick   = { lutPicker.launch("*/*") },
-                        onStartCrop = viewModel::startCrop,
+Column {
+        // Export progress indicator (thin bar above edit menu)
+        if (uiState.pendingExportCount > 0 && uiState.totalExports > 0) {
+            val current = uiState.completedExports + 1
+            val total = uiState.totalExports
+            val progress = (uiState.completedExports.toFloat() / total.toFloat()).coerceIn(0f, 1f)
+            Column(
+                modifier = Modifier
+                    .fillMaxWidth()
+                    .background(MaterialTheme.colorScheme.primaryContainer.copy(alpha = 0.3f))
+                    .padding(horizontal = 12.dp, vertical = 6.dp)
+            ) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically,
+                ) {
+                    Text(
+                        text = "Exporting $current of $total",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                    Text(
+                        text = "${(progress * 100).toInt()}%",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onPrimaryContainer.copy(alpha = 0.7f),
                     )
                 }
+                Spacer(modifier = Modifier.height(4.dp))
+                LinearProgressIndicator(
+                    progress = { progress },
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .height(4.dp)
+                        .clip(RoundedCornerShape(2.dp)),
+                    color = MaterialTheme.colorScheme.primary,
+                    trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.2f),
+                )
+            }
+        } else {
+            // Normal divider when not exporting
+            HorizontalDivider()
+        }
+        ToolControls(
+            state = uiState,
+            viewModel = viewModel,
+            onLutPick = { lutPicker.launch("*/*") },
+            onStartCrop = viewModel::startCrop,
+        )
+    }
             }
 
             // ── Full-screen overlays ───────────────────────────────────────────

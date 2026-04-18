@@ -126,10 +126,13 @@ data class EditorUiState(
     val gridMode: GridMode = GridMode.NONE,
     // Photo date (from EXIF — used for date imprint preview and rendering)
     val photoDate: Date? = null,
-    // Export / exit
-    val pendingExportCount: Int = 0,
-    val showExitConfirmDialog: Boolean = false,
-    val finishActivity: Boolean = false,
+// Export / exit
+val pendingExportCount: Int = 0,
+// Export progress tracking
+val totalExports: Int = 0, // Total exports when batch started
+val completedExports: Int = 0, // How many completed so far
+val showExitConfirmDialog: Boolean = false,
+val finishActivity: Boolean = false,
 )
 
 // ── Export job ────────────────────────────────────────────────────────────────
@@ -173,26 +176,37 @@ class EditorViewModel @Inject constructor(
                 lutFolder    = prefs.getString("lut_folder", "") ?: "",
             )
         }
-        // Launch a single coroutine that drains the export queue sequentially
-        viewModelScope.launch(Dispatchers.IO) {
-            for (job in exportChannel) {
-                val count = pendingExports.incrementAndGet()
-                _uiState.update { it.copy(pendingExportCount = count) }
-                runCatching {
-                    val processed = withContext(Dispatchers.Default) { pipeline.process(job.bitmap, job.state, job.lut, job.date) }
-                    saveToMediaStore(processed, job.quality)
-                    processed.recycle()
-                    _uiState.update { it.copy(snackbarMessage = "Saved") }
-                }.onFailure { err ->
-                    _uiState.update { it.copy(snackbarMessage = "Export failed: ${err.message}") }
-                }
-                val remaining = pendingExports.decrementAndGet()
-                _uiState.update { it.copy(pendingExportCount = remaining) }
-                if (remaining == 0 && shouldAutoFinish) {
-                    _uiState.update { it.copy(finishActivity = true) }
-                }
-            }
-        }
+// Launch a single coroutine that drains the export queue sequentially
+viewModelScope.launch(Dispatchers.IO) {
+for (job in exportChannel) {
+val count = pendingExports.incrementAndGet()
+val isFirst = count == 1 && _uiState.value.totalExports == 0
+val totalNow = if (isFirst) count else _uiState.value.totalExports
+_uiState.update { it.copy(pendingExportCount = count, totalExports = totalNow) }
+runCatching {
+val processed = withContext(Dispatchers.Default) { pipeline.process(job.bitmap, job.state, job.lut, job.date) }
+saveToMediaStore(processed, job.quality)
+processed.recycle()
+_uiState.update { it.copy(
+snackbarMessage = "Saved",
+completedExports = it.completedExports + 1
+) }
+}.onFailure { err ->
+_uiState.update { it.copy(
+snackbarMessage = "Export failed: ${err.message}",
+completedExports = it.completedExports + 1
+) }
+}
+val remaining = pendingExports.decrementAndGet()
+_uiState.update { it.copy(pendingExportCount = remaining) }
+if (remaining == 0) {
+_uiState.update { it.copy(totalExports = 0, completedExports = 0) }
+if (shouldAutoFinish) {
+_uiState.update { it.copy(finishActivity = true) }
+}
+}
+}
+}
     }
 
     override fun onCleared() {
