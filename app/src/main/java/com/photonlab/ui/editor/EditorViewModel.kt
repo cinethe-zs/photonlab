@@ -150,8 +150,9 @@ class EditorViewModel @Inject constructor(
 
     private val history = EditHistoryManager()
     private val prefs: SharedPreferences = context.getSharedPreferences("photonlab_prefs", Context.MODE_PRIVATE)
-    private val pendingExports = java.util.concurrent.atomic.AtomicInteger(0)
-    private var shouldAutoFinish = false
+private val pendingExports = java.util.concurrent.atomic.AtomicInteger(0)
+private var shouldAutoFinish = false
+private var totalBatchExports = 0
 
     private val _uiState = MutableStateFlow(EditorUiState())
     val uiState: StateFlow<EditorUiState> = _uiState.asStateFlow()
@@ -178,34 +179,32 @@ class EditorViewModel @Inject constructor(
         }
 // Launch a single coroutine that drains the export queue sequentially
 viewModelScope.launch(Dispatchers.IO) {
-for (job in exportChannel) {
-val count = pendingExports.incrementAndGet()
-val isFirst = count == 1 && _uiState.value.totalExports == 0
-val totalNow = if (isFirst) count else _uiState.value.totalExports
-_uiState.update { it.copy(pendingExportCount = count, totalExports = totalNow) }
-runCatching {
-val processed = withContext(Dispatchers.Default) { pipeline.process(job.bitmap, job.state, job.lut, job.date) }
-saveToMediaStore(processed, job.quality)
-processed.recycle()
-_uiState.update { it.copy(
-snackbarMessage = "Saved",
-completedExports = it.completedExports + 1
-) }
-}.onFailure { err ->
-_uiState.update { it.copy(
-snackbarMessage = "Export failed: ${err.message}",
-completedExports = it.completedExports + 1
-) }
-}
-val remaining = pendingExports.decrementAndGet()
-_uiState.update { it.copy(pendingExportCount = remaining) }
-if (remaining == 0) {
-_uiState.update { it.copy(totalExports = 0, completedExports = 0) }
-if (shouldAutoFinish) {
-_uiState.update { it.copy(finishActivity = true) }
-}
-}
-}
+    for (job in exportChannel) {
+        val count = pendingExports.incrementAndGet()
+        _uiState.update { it.copy(pendingExportCount = count) }
+        runCatching {
+            val processed = withContext(Dispatchers.Default) { pipeline.process(job.bitmap, job.state, job.lut, job.date) }
+            saveToMediaStore(processed, job.quality)
+            processed.recycle()
+            _uiState.update { it.copy(completedExports = it.completedExports + 1) }
+        }.onFailure { err ->
+            _uiState.update { it.copy(
+                snackbarMessage = "Export failed: ${err.message}",
+                completedExports = it.completedExports + 1
+            ) }
+        }
+        val remaining = pendingExports.decrementAndGet()
+        if (remaining == 0) {
+            _uiState.update { it.copy(pendingExportCount = 0, totalExports = 0, completedExports = 0) }
+            if (totalBatchExports > 1) {
+                _uiState.update { it.copy(snackbarMessage = "Export complete") }
+            }
+            totalBatchExports = 0
+            if (shouldAutoFinish) {
+                _uiState.update { it.copy(finishActivity = true) }
+            }
+        }
+    }
 }
     }
 
@@ -672,14 +671,18 @@ _uiState.update { it.copy(finishActivity = true) }
 
     // ── Export ────────────────────────────────────────────────────────────────
 
-    fun export() {
-        val src     = _uiState.value.sourceBitmap ?: return
-        val state   = _uiState.value.editState
-        val lut     = _uiState.value.currentLut
-        val quality = _uiState.value.jpegQuality
+fun export() {
+    val src = _uiState.value.sourceBitmap ?: return
+    val state = _uiState.value.editState
+    val lut = _uiState.value.currentLut
+    val quality = _uiState.value.jpegQuality
 
-        // Enqueue export job — processed sequentially in the background
-        exportChannel.trySend(ExportJob(src, state, lut, quality, _uiState.value.photoDate ?: Date()))
+    // Set total exports before sending to channel
+    totalBatchExports = 1
+    _uiState.update { it.copy(totalExports = 1, completedExports = 0) }
+
+    // Enqueue export job — processed sequentially in the background
+    exportChannel.trySend(ExportJob(src, state, lut, quality, _uiState.value.photoDate ?: Date()))
 
         // Navigate to next image immediately without waiting for the save
         if (batchIndex < batchUris.size - 1) {
@@ -708,14 +711,19 @@ _uiState.update { it.copy(finishActivity = true) }
     }
 
     /** Export every image in the batch using its saved edits (or pending preset), then clear the UI. */
-    fun exportAll() {
-        if (batchUris.isEmpty()) return
-        saveSnapshot()
-        val uris      = batchUris.toList()
-        val snapshots = batchSnapshots.toMap()
-        val pending   = _uiState.value.pendingPreset
-        val quality   = _uiState.value.jpegQuality
-        viewModelScope.launch(Dispatchers.IO) {
+fun exportAll() {
+    if (batchUris.isEmpty()) return
+    saveSnapshot()
+    val uris = batchUris.toList()
+    val snapshots = batchSnapshots.toMap()
+    val pending = _uiState.value.pendingPreset
+    val quality = _uiState.value.jpegQuality
+
+    // Set total exports before sending to channel
+    totalBatchExports = uris.size
+    _uiState.update { it.copy(totalExports = uris.size, completedExports = 0) }
+
+    viewModelScope.launch(Dispatchers.IO) {
             uris.forEachIndexed { index, uri ->
                 val (state, lut) = when {
                     snapshots.containsKey(index) -> snapshots[index]!!
